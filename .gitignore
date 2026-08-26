@@ -1,0 +1,32 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Editors and operating-system metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Secrets and local configuration
+.env
+.env.*
+*.key
+*.pem
+
+# Generated datasets and model artifacts
+data/uspto_50k/
+experiments/
+experiment/**/*.pt
+*.file.kekulized
+*.pkl
+*.joblib
+*.ckpt
+*.pth
+
+# Evaluation outputs generated locally
+pred_results*.txt
