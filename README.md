@@ -1,99 +1,45 @@
 # G2E-Aug
 
-Frequency-stratified evaluation for graph-editing single-step retrosynthesis.
+Code and frequency-stratified evaluation for graph-editing single-step retrosynthesis.
 
-This repository contains the complete G2E-Aug source implementation used for
-training, preprocessing, inference, and frequency-stratified evaluation. The
-data and checkpoint files needed to reproduce the archived manuscript results
-are distributed separately because they are research artifacts rather than
-source code.
+## Title
+
+**Average top-k accuracy conceals a forty-point head-to-tail gap in graph-editing retrosynthesis**
+
+G2E-Aug extends the Graph2Edits pipeline and evaluates retrosynthesis performance by the training frequency of the graph edits required by each test reaction. The repository contains the complete source code for preprocessing, training, beam-search inference, conventional Top-k evaluation, and many-/medium-/few-shot evaluation.
 
 ## Overview
 
-G2E-Aug is based on Graph2Edits and is used to study how average Top-k accuracy
-can conceal performance differences between frequent and rare graph edits. The
-repository supports two complementary evaluation views:
+The study asks whether aggregate Top-k accuracy hides systematic differences between frequent and rare reaction edits. Two complementary evaluation programs are provided:
 
-1. `eval.py` performs the conventional, unstratified beam-search evaluation and
-   records reaction-level predictions.
-2. `eval_bucket.py` performs an independent beam-search evaluation and reports
-   Top-1, Top-3, Top-5, and Top-10 exact-match accuracy by edit-frequency bucket.
+- `eval.py` runs conventional beam-search evaluation and saves reaction-level predictions.
+- `eval_bucket.py` independently runs beam search and reports Top-1, Top-3, Top-5, and Top-10 exact-match accuracy by edit-frequency bucket.
 
-The two scripts do not consume each other's output. Run both when both the
-conventional prediction record and the frequency-stratified report are needed.
-
-The main contribution of the accompanying study is the evaluation protocol and
-benchmark diagnosis. G2E-Aug is used as a case study; the available results do
-not establish that any individual augmentation causes a tail-performance gain.
-
-## Release status
-
-The complete source implementation is included. This release contains the
-augmented model, training and preprocessing pipelines, class-balancing and
-chemistry utilities, conventional evaluation, and frequency-stratified
-evaluation. Reproducing the archived numerical results additionally requires
-the processed USPTO-50K artifacts and the corresponding model checkpoint; the
-expected paths and file formats are documented below.
-
-## Method summary
+The two programs do not read each other's outputs. Use the same checkpoint and inference settings with both programs when comparing conventional and stratified results.
 
 Relative to the Graph2Edits backbone, the research branch jointly enables:
 
-1. a tabulated bond-dissociation-energy feature for an auxiliary reaction-centre
-   head;
+1. a tabulated bond-dissociation-energy feature and auxiliary reaction-centre head;
 2. a cost-sensitive auxiliary bond-breaking loss;
 3. product-reactant graph-representation alignment;
 4. effective-number weighting for edit and leaving-group targets;
-5. posterior logit adjustment for edit and leaving-group scores;
+5. posterior logit adjustment for edit and leaving-group scores; and
 6. leaving-group co-occurrence initialization and neighbour regularization.
 
-These changes were enabled together, without a component-wise ablation. The
-energy-aware head contributes through training losses; beam search is still
-ranked by the main edit logits.
+These components were enabled together. The current release does not include a component-wise ablation and should not be used to attribute an observed change to one component alone.
 
-## Repository layout
-
-```text
-data/
-  Atoms_character.txt        atom-property lookup table
-  Bond_Energy.txt            tabulated bond-energy lookup table
-models/
-  beam_search.py             beam-search inference
-  encoder.py                 graph encoder components
-  graph2edits.py             complete augmented model implementation
-utils/
-  action_frequencies.py      training-edit frequency counter
-  collate_fn.py              graph batching for inference
-  reaction_actions.py        graph edit actions
-  rxn_graphs.py              molecular graph construction
-  class_balance.py           long-tail balancing and logit adjustment
-  chem.py                    chemistry and bond-energy feature helpers
-preprocess.py                extract edit sequences and build artifacts
-prepare_data.py              tensorize edit sequences for training
-train.py                     train G2E-Aug
-eval.py                      conventional overall evaluation
-eval_bucket.py               frequency-stratified evaluation
-experiment/                  archived logs and aggregate reports
-```
-
-The executable scripts read checkpoints from `experiments/` (plural), whereas
-the report artifacts in this source release are stored in `experiment/`
-(singular). Place downloaded checkpoints under the corresponding plural path
-before evaluation, or update the selected experiment path consistently.
-
-## Environment requirements
+## Environment Requirements
 
 The validated core environment is:
 
 | Package | Version |
-| --- | ---: |
+| --- | --- |
 | Python | 3.11.8 |
 | PyTorch | 2.2.2 |
 | NumPy | 1.26.4 |
 | RDKit | 2024.03.4 |
 
-The code also imports `pandas`, `joblib`, and `tqdm`. Their versions are not
-pinned by this release. A reference installation is:
+The code also uses `pandas`, `joblib`, and `tqdm`. A reference installation is:
 
 ```bash
 conda create -n g2e-aug python=3.11.8
@@ -102,176 +48,180 @@ conda install -c conda-forge rdkit=2024.03.4 numpy=1.26.4
 python -m pip install torch==2.2.2 pandas joblib tqdm
 ```
 
-Verify the core versions with:
+Verify the core versions:
 
 ```bash
-python -c "import torch, numpy, rdkit; from rdkit import rdBase; print(torch.__version__, numpy.__version__, rdBase.rdkitVersion)"
+python -c "import torch, numpy; from rdkit import rdBase; print(torch.__version__, numpy.__version__, rdBase.rdkitVersion)"
 ```
 
-CUDA is optional. Both evaluators select CUDA automatically when
-`torch.cuda.is_available()` is true and otherwise run on CPU.
+CUDA is recommended for training and beam-search evaluation. `eval.py` supports loading a checkpoint on the selected CUDA or CPU device. OpenNMT is not required for the reported exact-match results; it is needed only for the optional round-trip path described below.
 
-OpenNMT is not required for the reported exact-match evaluation. It is only
-needed by the experimental `--round_trip` path in `eval_bucket.py`.
+## Data
 
-## Required evaluation artifacts
+### Source and license
 
-Run commands from the repository root. For `uspto_50k`, the evaluators expect a
-layout equivalent to:
+The experiments use the USPTO-50K reaction benchmark derived from Lowe's USPTO reaction data. The source collection is available from [Figshare](https://doi.org/10.6084/m9.figshare.5104873.v1) under CC0. The data preparation procedure follows the Graph2Edits representation and then creates the additional frequency and co-occurrence artifacts required by G2E-Aug.
+
+Please cite the original data source and Graph2Edits when using these derived files. USPTO-derived data and other third-party materials remain subject to their respective terms.
+
+### Input splits
+
+Place the canonicalized CSV files in `data/uspto_50k/`:
 
 ```text
 data/uspto_50k/
-  test/test.file.kekulized
-  train/action_freq_map.pkl
-  train/lg_cooccurrence_adj.pt
-  train/edit_class_stats.pt
-experiments/uspto_50k/
-  without_rxn_class/<run-name>/<checkpoint>.pt
-  with_rxn_class/<run-name>/<checkpoint>.pt
+  canonicalized_train.csv    40,008 input records
+  canonicalized_valid.csv     5,001 input records
+  canonicalized_test.csv      5,007 input records
 ```
 
-Each checkpoint must contain the model configuration under `saveables` and the
-parameter state under `state`. The processed test file is loaded with `joblib`.
-Predicted and reference reactants are compared as canonicalized component sets
-after atom-mapping information is removed.
+The archived evaluation contains 5,004 successfully processed test reactions. Three input test records are excluded during preprocessing because they do not yield valid evaluation examples. This distinction is reported explicitly so that the input-file size is not confused with the evaluation denominator.
 
-If `action_freq_map.pkl` is absent, `eval_bucket.py` calls
-`utils/action_frequencies.py` to rebuild it from the processed training data.
-That fallback requires `data/uspto_50k/train/train.file.kekulized`.
+### Processed layout
 
-## Evaluation 1: conventional results with `eval.py`
+After preprocessing, the relevant files are:
 
-`eval.py` performs the upstream-style evaluation over the complete test set. It
-runs beam search, reports running Top-1, Top-3, Top-5, and Top-10 accuracy, and
-writes every candidate prediction with its probability and edit sequence.
+```text
+data/uspto_50k/
+  train/
+    train.file.kekulized
+    bond_vocab.txt
+    atom_lg_vocab.txt
+    action_freq_map.pkl
+    lg_cooccurrence_adj.pt
+    edit_class_stats.pt
+    without_rxn_class/batch-*.pt
+    with_rxn_class/batch-*.pt
+  valid/
+    valid.file.kekulized
+  test/
+    test.file.kekulized
+```
+
+The CSV inputs and generated data artifacts are intentionally excluded from Git because they are dataset artifacts rather than source code. Their permanent archive status is listed under [Reproducibility and availability](#reproducibility-and-availability).
+
+## Data preprocessing
+
+Run all commands from the repository root.
+
+First, extract graph-edit sequences and build the vocabularies, edit-frequency map, leaving-group co-occurrence matrix, and edit-class statistics:
+
+```bash
+python preprocess.py --dataset uspto_50k --mode train
+python preprocess.py --dataset uspto_50k --mode valid
+python preprocess.py --dataset uspto_50k --mode test
+```
+
+Then tensorize the training set for both reaction-class settings:
+
+```bash
+python prepare_data.py --dataset uspto_50k --mode train
+python prepare_data.py --dataset uspto_50k --mode train --use_rxn_class
+```
+
+`action_freq_map.pkl` is generated from ground-truth training edits. If it is absent, `eval_bucket.py` attempts to rebuild it from `train.file.kekulized`.
+
+## Train G2E-Aug
+
+Train without reaction-class input:
+
+```bash
+python train.py --dataset uspto_50k
+```
+
+Train with reaction-class input:
+
+```bash
+python train.py --dataset uspto_50k --use_rxn_class
+```
+
+Checkpoints and training logs are written to timestamped directories:
+
+```text
+experiments/uspto_50k/without_rxn_class/<run-name>/
+experiments/uspto_50k/with_rxn_class/<run-name>/
+```
+
+The default training configuration uses 200 epochs. All model and loss hyperparameters are recorded in the saved checkpoint under `saveables` and in the experiment log.
+
+## Test
+
+The reported results use beam size 10 and a maximum of 9 graph-edit steps.
+
+### Conventional evaluation: `eval.py`
 
 Reaction class unknown:
 
 ```bash
-python eval.py \
-  --dataset uspto_50k \
-  --experiments 16-07-2026--01-17-31 \
-  --epoch epoch_86.pt \
-  --beam_size 10 \
-  --max_steps 9
+python eval.py --dataset uspto_50k --experiments 16-07-2026--01-17-31 --epoch epoch_86.pt --beam_size 10 --max_steps 9
 ```
 
 Reaction class known:
 
 ```bash
-python eval.py \
-  --dataset uspto_50k \
-  --use_rxn_class \
-  --experiments 15-07-2026--01-22-06 \
-  --epoch epoch_124.pt \
-  --beam_size 10 \
-  --max_steps 9
+python eval.py --dataset uspto_50k --use_rxn_class --experiments 15-07-2026--01-22-06 --epoch epoch_124.pt --beam_size 10 --max_steps 9
 ```
 
-Use `--epoch` to select the checkpoint file in the chosen experiment directory.
-Use the same checkpoint for conventional and frequency-stratified evaluation
-when comparing their aggregate results.
+`eval.py` reports conventional Top-k exact-match accuracy and writes all beam candidates, probabilities, and edit sequences to `pred_results.txt` in the selected experiment directory. Existing results are preserved by adding a numerical suffix.
 
-The prediction record is saved as:
+### Frequency-stratified evaluation: `eval_bucket.py`
 
-```text
-experiments/<dataset>/<setting>/<run-name>/pred_results.txt
+Reaction class unknown:
+
+```bash
+python eval_bucket.py --dataset uspto_50k --experiments 16-07-2026--01-17-31 --epoch epoch_86.pt --beam_size 10 --max_steps 9
 ```
 
-If the file already exists, `eval.py` creates `pred_results_1.txt`,
-`pred_results_2.txt`, and so on instead of overwriting it.
+Reaction class known:
 
-## Evaluation 2: frequency-stratified results with `eval_bucket.py`
+```bash
+python eval_bucket.py --dataset uspto_50k --use_rxn_class --experiments 15-07-2026--01-22-06 --epoch epoch_124.pt --beam_size 10 --max_steps 9
+```
 
-`eval_bucket.py` evaluates each reaction according to the least frequent
-non-terminal ground-truth edit that it requires.
+By default, `eval_bucket.py` writes `bucket_eval_epoch_<N>.md` and `bucket_eval_epoch_<N>.csv` in the selected experiment directory. Custom paths can be supplied with `--report_file` and `--csv_file`.
 
 ### Bucket definition
 
-1. Count ground-truth edit actions in the training set.
-2. Exclude the terminal `Terminate` action.
-3. For each test reaction, take the minimum training frequency among its
-   required edits.
-4. Assign the reaction to one of three buckets:
+For each test reaction, the evaluator finds the least frequent non-terminal ground-truth edit required by that reaction and assigns the entire reaction to one bucket:
 
-   - **Many-shot:** minimum frequency greater than 100.
-   - **Medium-shot:** minimum frequency from 20 through 100, inclusive.
-   - **Few-shot:** minimum frequency below 20; unseen edits have frequency 0.
+| Bucket | Minimum training frequency among required edits |
+| --- | ---: |
+| Many-shot | greater than 100 |
+| Medium-shot | 20 to 100, inclusive |
+| Few-shot | less than 20, including unseen edits |
 
-The evaluation unit is a reaction, not an individual edit action. The script
-reports each bucket overall and within each USPTO reaction class.
+`Terminate` is excluded from frequency assignment. The unit of evaluation is a reaction, not an individual edit. The thresholds are fixed evaluation settings and were not tuned on the test set.
 
-Reaction class unknown:
+### Which evaluator should be used?
 
-```bash
-python eval_bucket.py \
-  --dataset uspto_50k \
-  --experiments 16-07-2026--01-17-31 \
-  --epoch epoch_86.pt \
-  --beam_size 10 \
-  --max_steps 9
-```
-
-Reaction class known:
-
-```bash
-python eval_bucket.py \
-  --dataset uspto_50k \
-  --use_rxn_class \
-  --experiments 15-07-2026--01-22-06 \
-  --epoch epoch_124.pt \
-  --beam_size 10 \
-  --max_steps 9
-```
-
-Optional output names can be supplied with:
-
-```bash
-python eval_bucket.py \
-  --dataset uspto_50k \
-  --experiments <run-name> \
-  --epoch <checkpoint>.pt \
-  --report_file bucket_report.md \
-  --csv_file bucket_report.csv
-```
-
-By default, the script writes:
-
-```text
-bucket_eval_epoch_<N>.md
-bucket_eval_epoch_<N>.csv
-```
-
-Existing reports are not overwritten; a numbered sibling is created. The CSV
-contains evaluation metadata followed by:
-
-```text
-section,reaction_class,bucket,total_reactions,top1,top3,top5,top10,round_trip
-```
-
-## Which evaluator should be used?
-
-| Goal | Script | Main output |
+| Goal | Program | Output |
 | --- | --- | --- |
 | Inspect individual beam predictions | `eval.py` | `pred_results*.txt` |
-| Report conventional aggregate Top-k accuracy | `eval.py` | console progress and prediction record |
-| Measure many-, medium-, and few-shot performance | `eval_bucket.py` | Markdown and CSV reports |
-| Reproduce the manuscript's frequency analysis | `eval_bucket.py` | per-class and overall bucket tables |
+| Report conventional aggregate Top-k accuracy | `eval.py` | console summary and prediction record |
+| Measure many-/medium-/few-shot performance | `eval_bucket.py` | Markdown and CSV reports |
+| Reproduce the manuscript frequency analysis | both | conventional and stratified views of the same checkpoint |
 
-For a complete model assessment, use `eval.py` for the conventional prediction
-record and `eval_bucket.py` for the stratified report. Because both scripts run
-inference independently, use the same dataset, reaction-class setting, beam
-size, maximum steps, and intended checkpoint when comparing their results.
+## Reproducing our results
 
-## Archived bucket results
+Place the processed data and checkpoints at the following paths before running the two evaluation programs:
 
-The processed USPTO-50K test set contains 5,004 reactions:
+```text
+data/uspto_50k/test/test.file.kekulized
+data/uspto_50k/train/action_freq_map.pkl
+data/uspto_50k/train/lg_cooccurrence_adj.pt
+data/uspto_50k/train/edit_class_stats.pt
+experiments/uspto_50k/without_rxn_class/16-07-2026--01-17-31/epoch_86.pt
+experiments/uspto_50k/with_rxn_class/15-07-2026--01-22-06/epoch_124.pt
+```
 
-- 4,832 many-shot reactions (96.56%);
-- 120 medium-shot reactions (2.40%);
-- 52 few-shot reactions (1.04%).
+Checkpoint verification:
 
-The archived G2E-Aug reports contain:
+| Setting | Checkpoint | SHA-256 |
+| --- | --- | --- |
+| Reaction class unknown | `epoch_86.pt` | `540c41d8663faf2f3f16ec6bdb3d658c22e1fbb76667c6a720aee07aa99c0e16` |
+| Reaction class known | `epoch_124.pt` | `0522882ab2a1afae03581d5c34ea97081a91cc687df8afabc7075bfec3f9e033` |
+
+The archived stratified results are:
 
 | Reaction-class input | Bucket | n | Top-1 | Top-3 | Top-5 | Top-10 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -282,52 +232,87 @@ The archived G2E-Aug reports contain:
 | Known | Medium-shot | 120 | 46.7% | 62.5% | 72.5% | 82.5% |
 | Known | Few-shot | 52 | 17.3% | 46.2% | 51.9% | 57.7% |
 
-Archived reports:
+Machine-readable and Markdown reports are included in the repository:
 
-- [Reaction class unknown, epoch 86](experiment/uspto_50k/without_rxn_class/16-07-2026--01-17-31/bucket_eval_epoch_86.md)
-- [Reaction class known, epoch 124](experiment/uspto_50k/with_rxn_class/15-07-2026--01-22-06/bucket_eval_epoch_124.md)
+- [reaction class unknown, epoch 86](experiment/uspto_50k/without_rxn_class/16-07-2026--01-17-31/bucket_eval_epoch_86.md)
+- [reaction class known, epoch 124](experiment/uspto_50k/with_rxn_class/15-07-2026--01-22-06/bucket_eval_epoch_124.md)
 
-## Round-trip option
+## Repository structure
 
-`eval_bucket.py --round_trip` is an experimental path that requires a separately
-configured OpenNMT forward-reaction model and `--rt_model`. It was disabled for
-the archived reports and is not needed to reproduce the exact-match results.
+```text
+data/
+  Atoms_character.txt        atom-property lookup table
+  Bond_Energy.txt            bond-energy lookup table
+models/
+  beam_search.py             beam-search inference
+  encoder.py                 graph encoder components
+  graph2edits.py             augmented model
+utils/
+  action_frequencies.py      training-edit frequency counter
+  class_balance.py           class weighting and logit adjustment
+  chem.py                    chemistry and energy-feature utilities
+  collate_fn.py              inference batching
+  reaction_actions.py        graph-edit actions
+  rxn_graphs.py              molecular graph construction
+preprocess.py                extract edit sequences and build artifacts
+prepare_data.py              tensorize training edit sequences
+train.py                     train G2E-Aug
+eval.py                      conventional evaluation
+eval_bucket.py               frequency-stratified evaluation
+experiment/                  lightweight archived reports and logs
+```
 
-## Interpretation and limitations
+The executable scripts use `experiments/` (plural) for checkpoints and generated outputs. The lightweight reports committed to Git are retained under `experiment/` (singular).
 
-- The six augmentations were introduced jointly; no component-wise ablation is
-  available.
-- The model was trained once per reported setting, so run-to-run variance was
-  not estimated.
-- The energy-aware auxiliary head does not directly rank beam candidates.
-- The thresholds 20 and 100 are conventional and were not tuned.
-- Only 52 test reactions are few-shot under this definition.
-- Exact match counts chemically valid alternatives as incorrect when they differ
-  from the recorded reactants.
+## Reproducibility and availability
 
-The repository should therefore be used to study and reproduce the evaluation
-protocol, not to attribute an observed difference to one augmentation.
+| Research artifact | Location | Current status |
+| --- | --- | --- |
+| Complete source code | [GitHub repository](https://github.com/wenju2002-coder/G2E-Aug) | public |
+| Archived result tables and logs | `experiment/` in this repository | public |
+| Original USPTO source collection | [Figshare DOI](https://doi.org/10.6084/m9.figshare.5104873.v1) | public, CC0 |
+| Canonicalized splits and processed artifacts | versioned Zenodo reproducibility archive | DOI to be added before manuscript submission |
+| Trained checkpoints | versioned Zenodo reproducibility archive | DOI to be added before manuscript submission |
+| Versioned source release | GitHub release connected to Zenodo | DOI to be added before manuscript submission |
+
+The pending DOI entries are deliberately not replaced by invented identifiers. For a journal submission, publish the two Zenodo records, insert their permanent DOI links here and in the manuscript's Data Availability and Code Availability statements, and cite the exact archived version rather than the moving `main` branch.
+
+## Scope and limitations
+
+- All six augmentations were trained jointly; component-wise effects were not isolated.
+- One training run is reported for each reaction-class setting, so run-to-run variance is not estimated.
+- The auxiliary energy-aware head contributes through training losses but does not directly rank beam candidates.
+- Only 52 evaluated reactions are few-shot under the stated thresholds.
+- Exact match treats an unrecorded but chemically valid alternative as incorrect.
+- Round-trip evaluation was disabled for the archived results.
+
+The optional `eval_bucket.py --round_trip` path requires a separately configured OpenNMT forward-reaction model supplied through `--rt_model`; it is not needed to reproduce the reported exact-match tables.
 
 ## Upstream project
 
 This work is derived from Graph2Edits:
 
-> Zhong W, Yang Z, Chen CY-C. Retrosynthesis prediction using an end-to-end
-> graph generative architecture for molecular graph editing. *Nature
-> Communications*. 2023;14:3009.
-> <https://doi.org/10.1038/s41467-023-38851-5>
+> Zhong W, Yang Z, Chen CY-C. Retrosynthesis prediction using an end-to-end graph generative architecture for molecular graph editing. *Nature Communications*. 2023;14:3009. [https://doi.org/10.1038/s41467-023-38851-5](https://doi.org/10.1038/s41467-023-38851-5)
 
-The original Graph2Edits release is archived at
-[Zenodo](https://doi.org/10.5281/zenodo.7837349). Please cite the original work
-when using the base architecture.
+The original implementation is available on [GitHub](https://github.com/Jamson-Zhong/Graph2Edits) and archived on [Zenodo](https://doi.org/10.5281/zenodo.7837349). Please cite the original work when using the base architecture.
+
+## Citation
+
+The bibliographic record for the accompanying manuscript will be added after a preprint or journal DOI is assigned. Until then, cite the versioned G2E-Aug software release together with the Graph2Edits article.
+
+```bibtex
+@software{zhang_g2e_aug_2026,
+  author  = {Wenju Zhang and Xiaorui Wang and Yachao Cui and Yuquan Li and Pei Yang},
+  title   = {G2E-Aug: Frequency-stratified evaluation for graph-editing retrosynthesis},
+  year    = {2026},
+  url     = {https://github.com/wenju2002-coder/G2E-Aug}
+}
+```
 
 ## License
 
-Code in this repository is provided under the [MIT License](LICENSE). USPTO-derived
-data and third-party materials remain subject to their respective terms.
+The source code is released under the [MIT License](LICENSE).
 
-## Citation and contact
+## Contact
 
-The bibliographic record for the accompanying manuscript will be added after
-publication. For questions about the implementation or evaluation protocol,
-please open an issue in this GitHub repository.
+For implementation and reproducibility questions, open a GitHub issue or contact Wenju Zhang at `ys250854040484@mailbox.qhu.edu.cn`.
