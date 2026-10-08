@@ -52,8 +52,6 @@ def main():
                         action='store_true', help='Whether to use rxn_class')
     parser.add_argument('--experiments', type=str, default='16-07-2026--01-17-31',
                         help='Name of edits prediction experiment')
-    parser.add_argument('--epoch', type=str, default='epoch_86.pt',
-                        help='Checkpoint file name, e.g. epoch_86.pt')
     parser.add_argument('--beam_size', type=int,
                         default=10, help='Beam search width')
     parser.add_argument('--max_steps', type=int, default=9,
@@ -72,7 +70,7 @@ def main():
         exp_dir = os.path.join(
             ROOT_DIR, 'experiments', f'{args.dataset}', 'without_rxn_class', f'{args.experiments}')
 
-    checkpoint = torch.load(os.path.join(exp_dir, args.epoch), map_location=DEVICE)
+    checkpoint = torch.load(os.path.join(exp_dir, 'epoch_77.pt'))
     config = checkpoint['saveables']
 
     model = Graph2Edits(**config, device=DEVICE)
