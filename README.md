@@ -2,11 +2,14 @@
 
 Code and frequency-stratified evaluation for graph-editing single-step retrosynthesis.
 
+> [!IMPORTANT]
+> This branch is the review-period redacted release. Selected core implementation files contain a publication notice instead of executable source code. The complete implementation will be restored and archived after manuscript acceptance. For questions, please contact the authors.
+
 ## Title
 
 **Average top-k accuracy conceals a forty-point head-to-tail gap in graph-editing retrosynthesis**
 
-G2E-Aug extends the Graph2Edits pipeline and evaluates retrosynthesis performance by the training frequency of the graph edits required by each test reaction. The repository contains the complete source code for preprocessing, training, beam-search inference, conventional Top-k evaluation, and many-/medium-/few-shot evaluation.
+G2E-Aug extends the Graph2Edits pipeline and evaluates retrosynthesis performance by the training frequency of the graph edits required by each test reaction. This review-period repository exposes the project structure, non-core supporting code, evaluation protocols, and archived reports; selected core implementation files are temporarily redacted as listed below.
 
 ## Overview
 
@@ -27,6 +30,19 @@ Relative to the Graph2Edits backbone, the research branch jointly enables:
 6. leaving-group co-occurrence initialization and neighbour regularization.
 
 These components were enabled together. The current release does not include a component-wise ablation and should not be used to attribute an observed change to one component alone.
+
+### Review-period redaction
+
+The following files are placeholders in this branch:
+
+- `models/graph2edits.py`
+- `preprocess.py`
+- `prepare_data.py`
+- `train.py`
+- `utils/chem.py`
+- `utils/class_balance.py`
+
+`eval.py` and `eval_bucket.py` are retained so that the conventional and frequency-stratified evaluation definitions can be inspected. End-to-end preprocessing, training, and evaluation require the withheld files and will become executable when the complete implementation is released.
 
 ## Environment Requirements
 
@@ -268,14 +284,14 @@ The executable scripts use `experiments/` (plural) for checkpoints and generated
 
 | Research artifact | Location | Current status |
 | --- | --- | --- |
-| Complete source code | [GitHub repository](https://github.com/wenju2002-coder/G2E-Aug) | public |
+| Review-period source snapshot | [GitHub repository](https://github.com/wenju2002-coder/G2E-Aug) | public; selected core files temporarily redacted |
 | Archived result tables and logs | `experiment/` in this repository | public |
 | Original USPTO source collection | [Figshare DOI](https://doi.org/10.6084/m9.figshare.5104873.v1) | public, CC0 |
 | Canonicalized splits and processed artifacts | versioned Zenodo reproducibility archive | DOI to be added before manuscript submission |
 | Trained checkpoints | versioned Zenodo reproducibility archive | DOI to be added before manuscript submission |
-| Versioned source release | GitHub release connected to Zenodo | DOI to be added before manuscript submission |
+| Complete versioned source release | GitHub release connected to Zenodo | to be restored and archived after manuscript acceptance |
 
-The pending DOI entries are deliberately not replaced by invented identifiers. For a journal submission, publish the two Zenodo records, insert their permanent DOI links here and in the manuscript's Data Availability and Code Availability statements, and cite the exact archived version rather than the moving `main` branch.
+The pending DOI entries are deliberately not replaced by invented identifiers. The final complete release should be archived on Zenodo after manuscript acceptance, with the permanent DOI added here and to the manuscript's Code Availability statement. Dataset and checkpoint records may be archived separately and cited by their exact versions.
 
 ## Scope and limitations
 
