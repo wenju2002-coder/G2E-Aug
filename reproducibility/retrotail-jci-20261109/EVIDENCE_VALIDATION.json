@@ -1,0 +1,195 @@
+{
+  "version": "retrotail-data-20261109",
+  "scope": "Archive integrity and retained-record audit; no model loading or new inference.",
+  "archives": {
+    "Additional_file_2.zip": {
+      "files": 339,
+      "internal_manifest_verified": true,
+      "credential_pattern_scan": "no matches"
+    },
+    "Additional_file_3.zip": {
+      "files": 43,
+      "internal_manifest_verified": true,
+      "credential_pattern_scan": "no matches"
+    },
+    "Additional_file_4.zip": {
+      "files": 10,
+      "internal_manifest_verified": true,
+      "credential_pattern_scan": "no matches"
+    },
+    "Additional_file_5.zip": {
+      "files": 47,
+      "internal_manifest_verified": true,
+      "credential_pattern_scan": "no matches"
+    },
+    "Additional_file_6.zip": {
+      "files": 12,
+      "internal_manifest_verified": true,
+      "credential_pattern_scan": "no matches"
+    }
+  },
+  "prediction_tables": {
+    "Analysis/aug_known_per_reaction.csv": {
+      "rows": 5004,
+      "unique_patent_ids": 4194,
+      "alignment_key": [
+        "reaction_index",
+        "reaction_id",
+        "rxn_smi"
+      ],
+      "bucket_counts": {
+        "Many": 4832,
+        "Medium": 120,
+        "Few": 52
+      },
+      "success_counts": {
+        "Many": {
+          "top1": 3306,
+          "top3": 4283,
+          "top5": 4464,
+          "top10": 4597
+        },
+        "Medium": {
+          "top1": 56,
+          "top3": 75,
+          "top5": 87,
+          "top10": 99
+        },
+        "Few": {
+          "top1": 9,
+          "top3": 24,
+          "top5": 27,
+          "top10": 30
+        }
+      },
+      "sha256": "3c85370ec705e36e631691a7a1e0b3829507a1cec5d261bf36c628ff973622d8"
+    },
+    "Analysis/aug_unknown_per_reaction.csv": {
+      "rows": 5004,
+      "unique_patent_ids": 4194,
+      "alignment_key": [
+        "reaction_index",
+        "reaction_id",
+        "rxn_smi"
+      ],
+      "bucket_counts": {
+        "Many": 4832,
+        "Medium": 120,
+        "Few": 52
+      },
+      "success_counts": {
+        "Many": {
+          "top1": 2734,
+          "top3": 3832,
+          "top5": 4149,
+          "top10": 4408
+        },
+        "Medium": {
+          "top1": 31,
+          "top3": 51,
+          "top5": 61,
+          "top10": 83
+        },
+        "Few": {
+          "top1": 10,
+          "top3": 17,
+          "top5": 22,
+          "top10": 26
+        }
+      },
+      "sha256": "a10535f5f2a494b2bb1505682f8aba7c695a4e197d78726553e2d76eff7cf80e"
+    },
+    "Analysis/baseline_known_per_reaction.csv": {
+      "rows": 5004,
+      "unique_patent_ids": 4194,
+      "alignment_key": [
+        "reaction_index",
+        "reaction_id",
+        "rxn_smi"
+      ],
+      "bucket_counts": {
+        "Many": 4832,
+        "Medium": 120,
+        "Few": 52
+      },
+      "success_counts": {
+        "Many": {
+          "top1": 3290,
+          "top3": 4260,
+          "top5": 4468,
+          "top10": 4564
+        },
+        "Medium": {
+          "top1": 58,
+          "top3": 78,
+          "top5": 88,
+          "top10": 98
+        },
+        "Few": {
+          "top1": 12,
+          "top3": 21,
+          "top5": 27,
+          "top10": 30
+        }
+      },
+      "sha256": "422790aafa28915fb380038f98c16d1cd9bab7ded3dad0b2e36aa44dd4e7784b"
+    },
+    "Analysis/baseline_unknown_per_reaction.csv": {
+      "rows": 5004,
+      "unique_patent_ids": 4194,
+      "alignment_key": [
+        "reaction_index",
+        "reaction_id",
+        "rxn_smi"
+      ],
+      "bucket_counts": {
+        "Many": 4832,
+        "Medium": 120,
+        "Few": 52
+      },
+      "success_counts": {
+        "Many": {
+          "top1": 2714,
+          "top3": 3783,
+          "top5": 4089,
+          "top10": 4370
+        },
+        "Medium": {
+          "top1": 35,
+          "top3": 57,
+          "top5": 64,
+          "top10": 81
+        },
+        "Few": {
+          "top1": 7,
+          "top3": 16,
+          "top5": 19,
+          "top10": 20
+        }
+      },
+      "sha256": "caa49af79efb99aeb5bcbddaeb7ddb4713a226e5d366e40263f5e60e24ae5699"
+    }
+  },
+  "checkpoints": {
+    "Graph2Edits/experiments/uspto_50k/with_rxn_class/30-06-2022--00-19-29/epoch_92.pt": {
+      "archive": "Additional_file_4.zip",
+      "bytes": 5014697,
+      "sha256": "d6a098499231e3856fb34d55744ec7b4ecebb154d63b672b236da4241ab918c3"
+    },
+    "Graph2Edits/experiments/uspto_50k/without_rxn_class/27-06-2022--10-27-22/epoch_123.pt": {
+      "archive": "Additional_file_4.zip",
+      "bytes": 4994217,
+      "sha256": "e82cdff19ac1285755d4667ba6bc78e802053add8de6661eee0ba5323e44bcbe"
+    },
+    "Graph2Edits-Aug/experiment/uspto_50k/with_rxn_class/15-07-2026--01-22-06/epoch_124.pt": {
+      "archive": "Additional_file_6.zip",
+      "bytes": 6551216,
+      "sha256": "0522882ab2a1afae03581d5c34ea97081a91cc687df8afabc7075bfec3f9e033"
+    },
+    "Graph2Edits-Aug/experiment/uspto_50k/without_rxn_class/16-07-2026--01-17-31/epoch_86.pt": {
+      "archive": "Additional_file_6.zip",
+      "bytes": 6530686,
+      "sha256": "540c41d8663faf2f3f16ec6bdb3d658c22e1fbb76667c6a720aee07aa99c0e16"
+    }
+  }
+}

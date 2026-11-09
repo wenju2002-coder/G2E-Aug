@@ -65,24 +65,41 @@ historical_eval_bucket.py       retained historical bucket evaluator
 export_reaction_predictions.py  optional standalone prediction exporter
 cils_statistical_resolution.py  legacy unpaired power-planning calculation
 reaction_class_mapping.csv      index 0-9 to standard reaction class 1-10
-experiment/                     historical logs and aggregate reports, no weights
+experiment/                     historical logs and aggregate reports
+reproducibility/                downloadable manuscript-matched data and weights
 tests/                          lightweight evaluator regression tests
 ```
 
 ## Data and checkpoints
 
-This repository contains **complete source code**, small chemistry lookups and
-historical summaries. It does **not** contain raw/processed USPTO datasets,
-checkpoints, local environment archives or manuscript files. Original
-Graph2Edits resources are available from its upstream release; Aug weights and
-manuscript-specific processed artifacts are separate resources, not upstream
-weights. No project-specific public archive DOI is claimed.
+This repository contains **complete source code** and now also publishes the
+version-matched manuscript data, four retained checkpoints and ranked prediction
+records in [the RetroTail evidence archive](reproducibility/retrotail-jci-20261109/).
+The public version is tagged
+[`retrotail-data-20261109`](https://github.com/wenju2002-coder/G2E-Aug/tree/retrotail-data-20261109/reproducibility/retrotail-jci-20261109).
+No project-specific Zenodo DOI is claimed.
 
-For exact numerical reproduction of the manuscript, use its version-matched
-Supplementary Code and Data / Additional files with matching processed data,
-weights and retained ranked prediction records. Those files are not silently
-bundled into this Git repository. Only load trusted checkpoint/joblib files:
-their formats can execute code.
+| Archive | Contents |
+| --- | --- |
+| [Additional file 2](reproducibility/retrotail-jci-20261109/Additional_file_2.zip) | Four matched per-reaction prediction tables; statistical and plotting data/code |
+| [Additional file 3](reproducibility/retrotail-jci-20261109/Additional_file_3.zip) | Graph2Edits source, raw/canonicalised/processed reaction data and vocabularies |
+| [Additional file 4](reproducibility/retrotail-jci-20261109/Additional_file_4.zip) | Graph2Edits checkpoints (unknown epoch 123; known epoch 92), logs and raw predictions |
+| [Additional file 5](reproducibility/retrotail-jci-20261109/Additional_file_5.zip) | Graph2Edits-Aug source, matching reaction data, descriptors and vocabularies |
+| [Additional file 6](reproducibility/retrotail-jci-20261109/Additional_file_6.zip) | Graph2Edits-Aug checkpoints (unknown epoch 86; known epoch 124), logs and raw predictions |
+
+Download all five independent ZIPs and extract them into **one common directory**,
+not into five separate wrapper folders. This restores `Analysis/`,
+`evidence_analysis/`, `Graph2Edits/` and `Graph2Edits-Aug/`. The archived model
+directories contain their matching source versions; use them when reproducing
+historical inference, rather than assuming that any future `main` version is
+identical. The outer archive README contains extraction, integrity checks and
+provenance information. The ZIPs are byte-identical to the manuscript's local
+Additional files 2-6; no new training or inference was performed for publication.
+Local environments and main manuscript files are not included.
+
+Original Graph2Edits resources are also available from its upstream release;
+the Aug checkpoints are separate from the original Graph2Edits checkpoints.
+Only load trusted checkpoint/joblib files: their formats can execute code.
 
 Place `canonicalized_train.csv`, `canonicalized_valid.csv` and
 `canonicalized_test.csv` under `data/uspto_50k/`. Required CSV columns are `id`,
@@ -222,4 +239,7 @@ scoring without running model training or inference.
 
 The upstream [MIT License](LICENSE) and copyright notice are retained. Original
 datasets, checkpoints and third-party materials retain their own terms; this
-code license does not relicense them.
+code license does not relicense them. Newly contributed analysis/plotting code
+is MIT-licensed, and newly prepared statistical tables and curated prediction
+records are CC BY 4.0; see the archived
+[licence scope](reproducibility/retrotail-jci-20261109/LICENSE_SCOPE_JCI.md).

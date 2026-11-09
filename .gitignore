@@ -40,3 +40,6 @@ pred_results*.txt
 evaluation/
 outputs/
 tmp/
+
+# Explicitly published, version-matched manuscript evidence archives only.
+!reproducibility/retrotail-jci-20261109/Additional_file_[2-6].zip
