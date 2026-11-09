@@ -54,7 +54,7 @@ class MPNEncoder(nn.Module):
         ----------
         graph_tensors: Tuple[torch.Tensor],
             Tuple of graph tensors - Contains atom features, message vector details, the incoming bond indices of atoms
-            the index of the atom the bond is coming from, the index of the reverse bond and the undirected bond index 
+            the index of the atom the bond is coming from, the index of the reverse bond and the undirected bond index
             to the beginindex and endindex of the atoms.
         mask: torch.Tensor,
             Masks on nodes

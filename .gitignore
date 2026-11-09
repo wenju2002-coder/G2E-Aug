@@ -19,6 +19,7 @@ Thumbs.db
 *.pem
 
 # Generated datasets and model artifacts
+data/uspto_50k/
 experiments/
 experiment/**/*.pt
 *.file.kekulized
@@ -29,20 +30,3 @@ experiment/**/*.pt
 
 # Evaluation outputs generated locally
 pred_results*.txt
-
-# Large local environments, checkpoints and publication material
-*.pt
-*.tar.gz
-*.zip
-*.docx
-*.pdf
-evaluation/
-outputs/
-tmp/
-
-# Publish the retained processed split and the two matching Aug checkpoints.
-# New tensorized batches and unrelated checkpoints remain ignored above.
-!data/uspto_50k/**/*.file.kekulized
-!data/uspto_50k/train/action_freq_map.pkl
-!experiment/uspto_50k/without_rxn_class/16-07-2026--01-17-31/epoch_86.pt
-!experiment/uspto_50k/with_rxn_class/15-07-2026--01-22-06/epoch_124.pt

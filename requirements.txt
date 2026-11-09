@@ -1,7 +1,0 @@
-# Author-supplied Graph2Edits-Aug reference environment (Python 3.11.8).
-numpy==1.26.4
-torch==2.2.2
-rdkit==2024.3.4
-pandas
-joblib
-tqdm

@@ -15,7 +15,7 @@ def create_pad_tensor(alist):
 
 
 def prepare_edit_labels(graph_batch: List[MolGraph], edits: List[Any], edit_atoms: List[Any], bond_vocab: List, atom_vocab: List) -> torch.tensor:
-    """ 
+    """
     Prepare edit label including atom edits and bond edits.
     """
     bond_vocab_size = bond_vocab.size()
@@ -153,4 +153,3 @@ def get_batch_graphs(graph_batch: List[MolGraph], use_rxn_class: bool = False) -
     scopes = (a_scope, b_scope)
 
     return graph_tensors, scopes
-    

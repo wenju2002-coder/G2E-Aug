@@ -1,505 +1,418 @@
-"""Frequency-stratified evaluation for the Graph2Edits-Aug archive.
-
-This adapter uses the supplied Graph2Edits-Aug source and saved configuration.
-Source hashes are recorded at inference time. Python 3.7+.
-
-This script does not change the model, beam ranking, or training. It preserves
-the upstream exact-match convention and keeps invalid candidates in their ranks.
-Only load trusted checkpoints/joblib files: those formats can execute code.
-"""
-from __future__ import annotations
-
+import numpy as np
+import os
 import argparse
 import csv
-import hashlib
-import inspect
-import json
-import math
-import numbers
-import platform
-import sys
-import traceback
-from collections import Counter, defaultdict
-from datetime import datetime, timezone
-from pathlib import Path
+import joblib
+from tqdm import tqdm
+from collections import defaultdict, Counter
+import torch
+from rdkit import Chem, RDLogger
 
+from models import Graph2Edits, BeamSearch
+from utils.class_balance import load_lg_cooccurrence_adj, load_or_build_edit_class_stats
+from utils.action_frequencies import build_action_freq_map  # 确保训练时已生成
 
-UPSTREAM_URL = 'https://github.com/wenju2002-coder/G2E-Aug'
-CHECKED_COMMIT = None
-TOP_K = (1, 3, 5, 10)
-BUCKETS = ('Many-shot', 'Medium-shot', 'Few-shot')
-CLASS_NAMES = (
-    'Heteroatom alkylation and arylation', 'Acylation and related processes',
-    'C-C bond formation', 'Heterocycle formation', 'Protections',
-    'Deprotections', 'Reductions', 'Oxidations',
-    'Functional group interconversion', 'Functional group addition',
-)
+lg = RDLogger.logger()
+lg.setLevel(4)
 
+ROOT_DIR = './'
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-def parse_bool(value):
-    if isinstance(value, bool):
-        return value
-    if str(value).lower() in ('true', '1', 'yes'):
-        return True
-    if str(value).lower() in ('false', '0', 'no'):
-        return False
-    raise argparse.ArgumentTypeError('Use True or False, or omit the value for True.')
+def load_model_state(model, state):
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    if missing:
+        print(f'Checkpoint missing newly added parameters: {missing}')
+    if unexpected:
+        print(f'Checkpoint has unexpected parameters: {unexpected}')
 
-
-def make_parser():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dataset', default='uspto_50k', type=str.lower)
-    parser.add_argument('--use_rxn_class', '--use-rxn-class', nargs='?', const=True,
-                        default=False, type=parse_bool)
-    parser.add_argument('--code_root', '--code-root', type=Path,
-                        default=Path(__file__).resolve().parent,
-                        help='Graph2Edits-Aug root containing models/ and utils/.')
-    parser.add_argument('--checkpoint', type=Path,
-                        help='Explicit checkpoint path, relative to code_root or absolute.')
-    parser.add_argument('--experiments', help='Run subfolder under experiment/<dataset>/<setting>/.')
-    parser.add_argument('--epoch', help='Explicit filename, e.g. epoch_86.pt or epoch_124.pt.')
-    parser.add_argument('--test_file', '--test-file', type=Path,
-                        help='Default: data/<dataset>/test/test.file.kekulized.')
-    parser.add_argument('--train_file', '--train-file', type=Path,
-                        help='Default: data/<dataset>/train/train.file.kekulized.')
-    parser.add_argument('--frequency_map', '--frequency-map', type=Path,
-                        help='Optional trusted edit->count joblib map, e.g. the Aug comparison map.')
-    parser.add_argument('--output_dir', '--output-dir', type=Path,
-                        help='NEW output directory; existing directories are never overwritten.')
-    parser.add_argument('--device', choices=('auto', 'cpu', 'cuda'), default='auto')
-    parser.add_argument('--beam_size', '--beam-size', type=int, default=10)
-    parser.add_argument('--step_beam_size', '--step-beam-size', type=int, default=10)
-    parser.add_argument('--max_steps', '--max-steps', type=int, default=9)
-    parser.add_argument('--expected_test_reactions', '--expected-test-reactions', type=int,
-                        help='Optional strict check; use 5004 for the manuscript protocol.')
-    parser.add_argument('--max_reactions', '--max-reactions', type=int,
-                        help='Smoke test only. A prefix run is explicitly labelled incomplete.')
-    return parser
-
-
-def resolve_input(root, value, default=None):
-    path = Path(value if value is not None else default)
-    return (path if path.is_absolute() else root / path).resolve()
-
-
-def resolve_checkpoint(args, root):
-    if args.checkpoint is not None:
-        if args.experiments is not None or args.epoch is not None:
-            raise ValueError('Use --checkpoint OR both --experiments and --epoch, not both forms.')
-        return resolve_input(root, args.checkpoint)
-    if not args.experiments or not args.epoch:
-        raise ValueError('Specify --checkpoint, or BOTH --experiments and --epoch. No epoch is guessed.')
-    if Path(args.epoch).name != args.epoch:
-        raise ValueError('--epoch must be a filename. Use --checkpoint for an arbitrary path.')
-    setting = 'with_rxn_class' if args.use_rxn_class else 'without_rxn_class'
-    return (root / 'experiment' / args.dataset / setting / args.experiments / args.epoch).resolve()
-
-
-def sha256_file(path):
-    digest = hashlib.sha256()
-    with Path(path).open('rb') as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b''):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def is_terminate(edit):
-    return edit == 'Terminate' or (
-        isinstance(edit, (tuple, list)) and len(edit) > 0 and edit[0] == 'Terminate')
-
-
-def freeze_edit(edit):
-    return tuple(freeze_edit(value) for value in edit) if isinstance(edit, (tuple, list)) else edit
-
-
-def build_frequency_map(records):
-    """Count edit occurrences, not reactions containing an edit; training only."""
-    counter = Counter()
-    for record in records:
-        for edit in record.edits:
-            if not is_terminate(edit):
-                counter[freeze_edit(edit)] += 1
-    if not counter:
-        raise ValueError('No non-terminal training edits found; cannot define frequency buckets.')
-    return counter
-
-
-def validate_frequency_map(mapping):
-    if not hasattr(mapping, 'items'):
-        raise ValueError('Frequency map must be an edit->nonnegative integer count mapping.')
-    counter = Counter()
-    for edit, count in mapping.items():
-        if is_terminate(edit):
-            continue
-        if isinstance(count, bool) or not isinstance(count, numbers.Real) or not math.isfinite(float(count)):
-            raise ValueError('Invalid frequency for edit {!r}: {!r}'.format(edit, count))
-        if count < 0 or int(count) != count:
-            raise ValueError('Counts must be nonnegative integers, not probabilities or weights.')
-        counter[freeze_edit(edit)] = int(count)
-    if not counter or not any(counter.values()):
-        raise ValueError('Frequency map is empty or contains only zero counts.')
-    return counter
-
-
-def frequency_hash(frequencies):
-    """Serialization-independent signature for comparing baseline/Aug counters."""
-    payload = sorted((repr(edit), int(count)) for edit, count in frequencies.items())
-    return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode('utf-8')).hexdigest()
-
-
-def bucket_for_edits(edits, frequencies):
-    counts = [frequencies.get(freeze_edit(edit), 0) for edit in edits if not is_terminate(edit)]
-    rarest = min(counts) if counts else None
-    if rarest is None or rarest > 100:
-        return 'Many-shot', rarest
-    return ('Medium-shot' if rarest >= 20 else 'Few-shot'), rarest
-
-
-def class_info(value, dataset):
-    if value is None:
-        return -1, '', 'Unspecified'
-    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
-        raise ValueError('Reaction class must be a preprocessed integer index, received {!r}.'.format(value))
-    index = int(value)
-    if dataset == 'uspto_50k' and not 0 <= index < 10:
-        raise ValueError('USPTO-50K processed classes must be 0-9, not raw CSV classes 1-10.')
-    return index, index + 1, CLASS_NAMES[index] if 0 <= index < 10 else 'Class {}'.format(index + 1)
-
-
-def json_value(value):
-    if hasattr(value, 'item'):
-        value = value.item()
-    if value is None or isinstance(value, (str, int, float, bool)):
-        if isinstance(value, float) and not math.isfinite(value):
-            return None
-        return value
-    if isinstance(value, dict):
-        return {str(key): json_value(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [json_value(item) for item in value]
-    return str(value)
-
-
-def canonical_reference(smiles, Chem):
-    """Exactly the reference normalization used by upstream eval.py."""
-    molecule = Chem.MolFromSmiles(smiles)
-    if molecule is None:
-        raise ValueError('Cannot parse reference reactants.')
-    for atom in molecule.GetAtoms():
-        if atom.HasProp('molAtomMapNumber'):
-            atom.ClearProp('molAtomMapNumber')
-    molecule = Chem.MolFromSmiles(Chem.MolToSmiles(molecule))
-    if molecule is None:
-        raise ValueError('Cannot normalize reference reactants.')
-    return Chem.MolToSmiles(molecule, isomericSmiles=True)
-
-
-def score_paths(paths, reference, beam_size):
-    """Do NOT filter/deduplicate/reorder beams or re-canonicalize predicted SMILES."""
-    truth = set(reference.split('.'))
-    predictions = []
-    first_match = None
-    for rank, path in enumerate(paths[:beam_size], 1):
-        smiles = path.get('final_smi')
-        valid = isinstance(smiles, str) and smiles not in ('', 'final_smi_unmapped')
-        correct = valid and set(smiles.split('.')) == truth
-        if correct and first_match is None:
-            first_match = rank
-        predictions.append({
-            'rank': rank, 'final_smi': smiles if valid else None,
-            'probability': json_value(path.get('prob')),
-            'prediction_is_correct': bool(correct),
-            'rxn_actions': [str(action) for action in path.get('rxn_actions', [])],
-            'edits_prob': json_value(path.get('edits_prob', [])),
-        })
-    hits = {'top{}'.format(k): int(first_match is not None and first_match <= k) for k in TOP_K}
-    return predictions, first_match, hits
-
-
-def new_stats():
-    return {'total': 0, **{'top{}'.format(k): 0 for k in TOP_K}}
-
-
-def update_stats(stats, class_index, bucket, hits):
-    for key in ((class_index, bucket), ('All', bucket), ('All', 'All')):
-        stats[key]['total'] += 1
-        for metric, hit in hits.items():
-            stats[key][metric] += int(hit)
-
-
-def summary_rows(stats, dataset):
-    classes = sorted(key[0] for key in stats if isinstance(key[0], int))
-    classes = sorted(set(classes))
-    rows = []
-    for section, indices, buckets in (
-        ('by_reaction_class', classes, BUCKETS),
-        ('overall', ['All'], BUCKETS), ('aggregate', ['All'], ['All']),
-    ):
-        for index in indices:
-            for bucket in buckets:
-                values = stats.get((index, bucket), new_stats())
-                if index == 'All':
-                    number, name = 'All', 'All reaction classes'
-                else:
-                    _, number, name = class_info(None if index == -1 else index, dataset)
-                n = values['total']
-                row = {'section': section, 'reaction_class': index,
-                       'class_number_1_based': number, 'class_name': name,
-                       'bucket': bucket, 'total_reactions': n}
-                for k in TOP_K:
-                    key = 'top{}'.format(k)
-                    row['correct_' + key] = values[key]
-                    row[key] = round(100.0 * values[key] / n, 6) if n else ''
-                rows.append(row)
-    return rows
-
-
-def write_json(path, value):
-    with Path(path).open('w', encoding='utf-8') as handle:
-        json.dump(json_value(value), handle, ensure_ascii=False, indent=2, allow_nan=False)
-        handle.write('\n')
-
-
-def write_reports(output, epoch_tag, stats, metadata):
-    rows = summary_rows(stats, metadata['dataset'])
-    with (output / ('bucket_eval_' + epoch_tag + '.csv')).open('w', encoding='utf-8', newline='') as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-    lines = [
-        '# Graph2Edits frequency-stratified evaluation', '',
-        '- Status: ' + metadata['status'],
-        '- Full test set: ' + str(metadata['full_test_set']),
-        '- Checkpoint: `' + metadata['checkpoint']['path'] + '`',
-        '- Checkpoint SHA-256: `' + metadata['checkpoint']['sha256'] + '`',
-        '- Use reaction class: ' + str(metadata['use_rxn_class']),
-        '- Beam / step beam / max steps: {beam_size} / {step_beam_size} / {max_steps}'.format(**metadata),
-        '- Evaluated / available test reactions: {evaluated_reactions} / {available_test_reactions}'.format(**metadata),
-        '- Buckets: minimum NON-terminal training edit count; >100 / 20-100 / <20.',
-        '- Class index 0-9 corresponds to standard class number 1-10.',
-        '- Accuracy is in percent; CSV also contains exact integer success counts.', '',
-        '| Section | Class number | Class name | Bucket | N | Top-1 | Top-3 | Top-5 | Top-10 |',
-        '| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |',
-    ]
-    for row in rows:
-        rates = ['{:.4f}%'.format(row['top{}'.format(k)]) if row['total_reactions'] else '-' for k in TOP_K]
-        lines.append('| {} | {} | {} | {} | {} | {} |'.format(
-            row['section'], row['class_number_1_based'], row['class_name'], row['bucket'],
-            row['total_reactions'], ' | '.join(rates)))
-    text = '\n'.join(lines) + '\n'
-    (output / ('bucket_eval_' + epoch_tag + '.md')).write_text(text, encoding='utf-8')
-    print(text)
-
-
-def load_runtime(root):
-    if not (root / 'models' / 'graph2edits.py').is_file() or not (root / 'utils').is_dir():
-        raise ValueError('Invalid --code_root. Copy this script into the Graph2Edits-Aug root, '
-                         'or pass --code_root /path/to/Graph2Edits.')
-    sys.path.insert(0, str(root))
-    import joblib
-    import torch
-    from rdkit import Chem, RDLogger, rdBase
-    from tqdm import tqdm
-    from models import Graph2Edits, BeamSearch
-    from utils.mol_features import ATOM_FDIM
-    for model_class in (Graph2Edits, BeamSearch):
-        source = Path(inspect.getfile(model_class)).resolve()
-        if root not in source.parents:
-            raise ValueError('Imported the wrong code release: ' + str(source))
-    RDLogger.DisableLog('rdApp.*')
-    return joblib, torch, Chem, rdBase, tqdm, Graph2Edits, BeamSearch, ATOM_FDIM
-
-
-def run(args):
-    root = args.code_root.resolve()
-    if args.frequency_map is not None and args.train_file is not None:
-        raise ValueError('Use --frequency_map OR --train_file, not both sources.')
-    if args.beam_size < 10:
-        raise ValueError('--beam_size must be >=10 to report Top-10.')
-    if args.step_beam_size <= 0 or args.max_steps <= 0:
-        raise ValueError('Step beam size and max steps must be positive.')
-    if args.max_reactions is not None and args.max_reactions <= 0:
-        raise ValueError('--max_reactions must be positive.')
-    checkpoint_path = resolve_checkpoint(args, root)
-    test_path = resolve_input(root, args.test_file, 'data/{}/test/test.file.kekulized'.format(args.dataset))
-    frequency_source = resolve_input(root, args.frequency_map) if args.frequency_map else resolve_input(
-        root, args.train_file, 'data/{}/train/train.file.kekulized'.format(args.dataset))
-    for path in (checkpoint_path, test_path, frequency_source):
-        if not path.is_file():
-            raise FileNotFoundError('Missing input: {}. Run original preprocess.py for train/test first; '
-                                    'or supply the matching file explicitly.'.format(path))
-    joblib, torch, Chem, rdBase, tqdm, Graph2Edits, BeamSearch, atom_fdim = load_runtime(root)
-    device = ('cuda' if torch.cuda.is_available() else 'cpu') if args.device == 'auto' else args.device
-    if device == 'cuda' and not torch.cuda.is_available():
-        raise ValueError('CUDA requested but unavailable; use --device cpu.')
-    # Legacy torch lacks weights_only; modern torch defaults may reject trusted custom Vocab objects.
-    load_kwargs = {'map_location': device}
-    if 'weights_only' in inspect.signature(torch.load).parameters:
-        load_kwargs['weights_only'] = False
-    checkpoint = torch.load(str(checkpoint_path), **load_kwargs)
-    if not isinstance(checkpoint, dict) or not all(key in checkpoint for key in ('state', 'saveables')):
-        raise ValueError('Expected Graph2Edits-Aug checkpoint with state and saveables.')
-    augmented = ('bond_break_linear', 'lg_gcn_', 'bond_logit_adjustment', 'atom_logit_adjustment')
-    if not any(key.startswith('bond_break_linear.') for key in checkpoint['state']):
-        raise ValueError('This is a baseline checkpoint. Use Graph2Edits-Aug weights.')
-    config = checkpoint['saveables']['config']
-    expected_dim = atom_fdim + (10 if args.use_rxn_class else 0)
-    if config.get('n_atom_feat') != expected_dim:
-        raise ValueError('Checkpoint n_atom_feat={} disagrees with --use_rxn_class={} '
-                         '(expected {}). Check setting/weights/code.'.format(
-                             config.get('n_atom_feat'), args.use_rxn_class, expected_dim))
-    model = Graph2Edits(**checkpoint['saveables'], device=device)
-    if not hasattr(model, 'bond_break_linear') or not hasattr(model, 'lg_gcn_in'):
-        raise ValueError('--code_root must point to the supplied Graph2Edits-Aug implementation.')
-    model.load_state_dict(checkpoint['state'], strict=True)
-    model.to(device)
-    model.eval()
-    records = joblib.load(str(test_path))
-    if not records:
-        raise ValueError('Empty test data.')
-    if args.expected_test_reactions is not None and len(records) != args.expected_test_reactions:
-        raise ValueError('Expected {} test reactions, found {}. Do not silently change the denominator.'.format(
-            args.expected_test_reactions, len(records)))
-    if args.frequency_map:
-        frequencies = validate_frequency_map(joblib.load(str(frequency_source)))
-        training_count = None
-    else:
-        train_records = joblib.load(str(frequency_source))
-        training_count = len(train_records)
-        frequencies = build_frequency_map(train_records)
-        del train_records
-    limit = min(args.max_reactions, len(records)) if args.max_reactions else len(records)
-    for record in records[:limit]:
-        index, _, _ = class_info(getattr(record, 'rxn_class', None), args.dataset)
-        if args.use_rxn_class and not 0 <= index < 10:
-            raise ValueError('Class-conditioned evaluation requires a valid class label per reaction.')
-    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-    output = args.output_dir.resolve() if args.output_dir else checkpoint_path.parent / (
-        'bucket_eval_' + checkpoint_path.stem + '_' + stamp)
-    if output.exists():
-        raise FileExistsError('Refusing to overwrite existing output directory: ' + str(output))
-    output.mkdir(parents=True, exist_ok=False)
-    metadata = {
-        'status': 'running', 'model': 'Graph2Edits-Aug', 'dataset': args.dataset,
-        'started_utc': stamp, 'use_rxn_class': args.use_rxn_class,
-        'beam_size': args.beam_size, 'step_beam_size': args.step_beam_size, 'max_steps': args.max_steps,
-        'available_test_reactions': len(records), 'requested_reactions': limit,
-        'expected_test_reactions': args.expected_test_reactions,
-        'evaluated_reactions': 0, 'full_test_set': False,
-        'checkpoint': {'path': str(checkpoint_path), 'sha256': sha256_file(checkpoint_path)},
-        'test_file': {'path': str(test_path), 'sha256': sha256_file(test_path)},
-        'frequency_source': {'path': str(frequency_source), 'sha256': sha256_file(frequency_source),
-                             'kind': 'supplied_map' if args.frequency_map else 'training_edit_occurrences',
-                             'training_reactions': training_count},
-        'frequency_map_content_sha256': frequency_hash(frequencies),
-        'frequency_actions': len(frequencies), 'no_edit_reactions': 0,
-        'invalid_candidates': 0, 'reactions_with_invalid_candidates': 0,
-        'reactions_without_candidates': 0,
-        'bucket_protocol': {'many': '>100', 'medium': '20-100 inclusive', 'few': '<20',
-                            'unseen_edit_count': 0, 'only_terminate_policy': 'Many-shot'},
-        'match_policy': 'upstream exact-match: canonical unmapped reference fragment set vs raw beam fragment set',
-        'code_root': str(root), 'checked_upstream_commit': CHECKED_COMMIT, 'upstream_url': UPSTREAM_URL,
-        'model_config': config,
-        'versions': {'python': platform.python_version(), 'torch': torch.__version__,
-                     'rdkit': rdBase.rdkitVersion, 'joblib': joblib.__version__,
-                     'numpy': __import__('numpy').__version__},
-        'source_sha256': {str(path.relative_to(root)): sha256_file(path) for path in sorted(
-            list((root / 'models').glob('*.py')) + list((root / 'utils').glob('*.py')) +
-            [root / 'prepare_data.py']) if path.is_file()},
-        'evaluator_sha256': sha256_file(Path(__file__)),
-    }
-    write_json(output / 'metadata.json', metadata)
-    joblib.dump(frequencies, str(output / 'action_freq_map.pkl'), compress=3)
-    search = BeamSearch(model=model, step_beam_size=args.step_beam_size,
-                        beam_size=args.beam_size, use_rxn_class=args.use_rxn_class)
-    stats = defaultdict(new_stats)
-    fields = ['reaction_index', 'reaction_id', 'class_index_0_based', 'class_number_1_based',
-              'class_name', 'bucket', 'min_edit_frequency', 'rxn_smi', 'ground_truth_reactants',
-              'predictions_top10_json', 'first_match_rank', 'top1', 'top3', 'top5', 'top10',
-              'model', 'use_rxn_class', 'checkpoint_sha256']
+def canonicalize(smi):
     try:
-        with (output / 'predictions_top10.csv').open('w', encoding='utf-8', newline='') as csv_fp, \
-                (output / 'predictions.jsonl').open('w', encoding='utf-8') as json_fp, \
-                (output / 'pred_results.txt').open('w', encoding='utf-8') as raw_fp:
-            writer = csv.DictWriter(csv_fp, fieldnames=fields)
-            writer.writeheader()
-            progress = tqdm(range(limit), desc='Graph2Edits-Aug buckets')
-            for index in progress:
-                record = records[index]
-                class_index, class_number, class_name = class_info(getattr(record, 'rxn_class', None), args.dataset)
-                bucket, rarest = bucket_for_edits(record.edits, frequencies)
-                reactants, product = record.rxn_smi.split('>>')
-                reference = canonical_reference(reactants, Chem)
-                with torch.no_grad():
-                    paths = search.run_search(prod_smi=product, max_steps=args.max_steps,
-                                              rxn_class=record.rxn_class if args.use_rxn_class else None)
-                predictions, first_match, hits = score_paths(paths, reference, args.beam_size)
-                update_stats(stats, class_index, bucket, hits)
-                row = {
-                    'reaction_index': index, 'reaction_id': json_value(getattr(record, 'rxn_id', '')),
-                    'class_index_0_based': class_index, 'class_number_1_based': class_number,
-                    'class_name': class_name, 'bucket': bucket, 'min_edit_frequency': rarest,
-                    'rxn_smi': record.rxn_smi, 'ground_truth_reactants': reference,
-                    'predictions_top10_json': json.dumps([p['final_smi'] for p in predictions[:10]], ensure_ascii=False),
-                    'first_match_rank': first_match if first_match is not None else '', **hits,
-                    'model': 'Graph2Edits-Aug', 'use_rxn_class': args.use_rxn_class,
-                    'checkpoint_sha256': metadata['checkpoint']['sha256'],
-                }
-                writer.writerow(row)
-                json_fp.write(json.dumps({**row, 'true_edits': json_value(record.edits),
-                                          'predictions': predictions}, ensure_ascii=False, allow_nan=False) + '\n')
-                raw_fp.write('({}) {}\n'.format(index, record.rxn_smi))
-                for pred in predictions:
-                    actions = '|'.join('({};{})'.format(action, prob) for action, prob in zip(
-                        pred['rxn_actions'], pred['edits_prob']))
-                    raw_fp.write('{} prediction_is_correct:{} probability:{} {} {}\n'.format(
-                        pred['rank'] - 1, pred['prediction_is_correct'], pred['probability'],
-                        pred['final_smi'] or 'final_smi_unmapped', actions))
-                raw_fp.write('\n')
-                metadata['evaluated_reactions'] = index + 1
-                metadata['no_edit_reactions'] += int(rarest is None)
-                invalid = sum(pred['final_smi'] is None for pred in predictions)
-                metadata['invalid_candidates'] += invalid
-                metadata['reactions_with_invalid_candidates'] += int(invalid > 0)
-                metadata['reactions_without_candidates'] += int(not predictions)
-                if (index + 1) % 50 == 0:
-                    for handle in (csv_fp, json_fp, raw_fp):
-                        handle.flush()
-                    write_json(output / 'metadata.json', metadata)
-                progress.set_postfix({'top1': '{:.4f}'.format(stats[('All', 'All')]['top1'] / (index + 1))})
-        total = stats[('All', 'All')]['total']
-        if total != limit or sum(stats.get(('All', b), new_stats())['total'] for b in BUCKETS) != total:
-            raise AssertionError('Bucket counts do not reconcile with evaluated reaction count.')
-        metadata.update(status='complete', evaluated_reactions=total,
-                        full_test_set=total == len(records) and args.max_reactions is None,
-                        finished_utc=datetime.now(timezone.utc).isoformat())
-        metadata['bucket_sizes'] = {b: stats.get(('All', b), new_stats())['total'] for b in BUCKETS}
-        if args.max_reactions is not None:
-            metadata['run_purpose'] = 'limited evaluation / smoke test; not a manuscript result'
-        write_reports(output, checkpoint_path.stem, stats, metadata)
-        write_json(output / 'metadata.json', metadata)
-    except BaseException as exc:
-        metadata.update(status='failed', full_test_set=False,
-                        failure={'type': type(exc).__name__, 'message': str(exc)})
-        write_json(output / 'metadata.json', metadata)
-        (output / 'failure.txt').write_text(traceback.format_exc(), encoding='utf-8')
-        raise
-    print('Saved new evaluation directory: ' + str(output))
-    if metadata['invalid_candidates'] or metadata['reactions_without_candidates']:
-        print('Diagnostic: {} invalid beam candidates and {} reactions without candidates. '
-              'Their ranks/denominators were retained; inspect predictions.jsonl and software versions.'.format(
-                  metadata['invalid_candidates'], metadata['reactions_without_candidates']))
-    return output
+        mol = Chem.MolFromSmiles(smi)
+    except:
+        return smi
+    if mol is None:
+        return smi
+    mol = Chem.RemoveHs(mol)
+    [a.ClearProp('molAtomMapNumber') for a in mol.GetAtoms()]
+    return Chem.MolToSmiles(mol)
+
+def canonicalize_p(smi):
+    p = canonicalize(smi)
+    p_mol = Chem.MolFromSmiles(p)
+    [a.SetAtomMapNum(a.GetIdx()+1) for a in p_mol.GetAtoms()]
+    return Chem.MolToSmiles(p_mol)
+
+# ---------- 分桶相关 ----------
+def get_bucket(edits, freq_map):
+    """
+    edits: list of edit tuples, e.g. [('Change Atom', (1,0)), ('Terminate',)]
+    freq_map: Counter mapping edit -> frequency in training
+    Returns: 'Many-shot', 'Medium-shot', or 'Few-shot'
+    """
+    min_freq = float('inf')
+    for edit in edits:
+        if edit == 'Terminate':
+            continue
+        f = freq_map.get(edit, 0)  # 未见过的编辑视为 0
+        if f < min_freq:
+            min_freq = f
+    # 如果 min_freq 仍为 inf（只有 Terminate），视为 Many-shot 吧，但实际不会发生
+    if min_freq > 100:
+        return 'Many-shot'
+    elif min_freq >= 20:
+        return 'Medium-shot'
+    else:
+        return 'Few-shot'
+
+# ---------- Round-trip 辅助（从 eval-1.py 移植）----------
+def smi_tokenizer(smi):
+    import re
+    pattern = r"(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+    regex = re.compile(pattern)
+    tokens = [token for token in regex.findall(smi)]
+    assert smi == ''.join(tokens)
+    return ' '.join(tokens)
+
+def round_trip_translate(pred_text, opt, translator):
+    """Run round-trip translation given predicted SMILES file."""
+    all_scores, all_predictions = translator.translate(
+        src_path=pred_text,
+        tgt_path=opt.tgt,
+        src_dir=opt.src_dir,
+        batch_size=opt.batch_size,
+        attn_debug=opt.attn_debug
+    )
+    return all_predictions
+
+# ---------- 主评估函数 ----------
+def get_available_report_path(exp_dir, epoch_name):
+    epoch_tag = os.path.splitext(os.path.basename(epoch_name))[0]
+    report_path = os.path.join(exp_dir, f'bucket_eval_{epoch_tag}.md')
+    if not os.path.exists(report_path):
+        return report_path
+
+    file_idx = 1
+    while True:
+        candidate = os.path.join(exp_dir, f'bucket_eval_{epoch_tag}_{file_idx}.md')
+        if not os.path.exists(candidate):
+            return candidate
+        file_idx += 1
+
+
+def get_available_csv_path(exp_dir, epoch_name):
+    epoch_tag = os.path.splitext(os.path.basename(epoch_name))[0]
+    csv_path = os.path.join(exp_dir, f'bucket_eval_{epoch_tag}.csv')
+    if not os.path.exists(csv_path):
+        return csv_path
+
+    file_idx = 1
+    while True:
+        candidate = os.path.join(exp_dir, f'bucket_eval_{epoch_tag}_{file_idx}.csv')
+        if not os.path.exists(candidate):
+            return candidate
+        file_idx += 1
 
 
 def main():
-    parser = make_parser()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='uspto_50k',
+                        help='dataset: uspto_50k or uspto_full')
+    parser.add_argument("--use_rxn_class", default=False,
+                        action='store_true', help='Whether to use rxn_class')
+    parser.add_argument('--experiments', type=str, default="16-07-2026--01-17-31",
+                        help='Name of edits prediction experiment (subfolder under with_rxn_class/without_rxn_class)')
+    parser.add_argument('--epoch', type=str, default='epoch_86.pt',
+                        help='Checkpoint file name, e.g. epoch_105.pt')
+    parser.add_argument('--report_file', type=str, default=None,
+                        help='Optional report filename saved under the experiment directory')
+    parser.add_argument('--csv_file', type=str, default=None,
+                        help='Optional CSV filename saved under the experiment directory')
+    parser.add_argument('--beam_size', type=int, default=10,
+                        help='Beam search width')
+    parser.add_argument('--max_steps', type=int, default=9,
+                        help='maximum number of edit steps')
+    parser.add_argument('--round_trip', action='store_true',
+                        help='Enable round-trip evaluation (requires separate translator)')
+    parser.add_argument('--rt_model', type=str, default=None,
+                        help='Path to round-trip translation model (optional)')
     args = parser.parse_args()
-    try:
-        run(args)
-    except (ValueError, FileNotFoundError, FileExistsError) as exc:
-        parser.exit(2, 'Evaluation stopped: {}\n'.format(exc))
+    args.dataset = args.dataset.lower()
 
+    # 1. 加载动作频率映射
+    freq_map_path = f'data/{args.dataset}/train/action_freq_map.pkl'
+    if not os.path.exists(freq_map_path):
+        print("Frequency map not found. Building now...")
+        from utils.action_frequencies import build_action_freq_map
+        freq_map = build_action_freq_map(dataset=args.dataset)
+    else:
+        freq_map = joblib.load(freq_map_path)
+    print(f"Loaded frequency map with {len(freq_map)} actions.")
+
+    # 2. 加载测试数据
+    data_dir = os.path.join(ROOT_DIR, 'data', args.dataset, 'test')
+    test_file = os.path.join(data_dir, 'test.file.kekulized')
+    test_data = joblib.load(test_file)
+
+    # 3. 确定实验目录
+    if args.use_rxn_class:
+        exp_dir = os.path.join(ROOT_DIR, 'experiments', args.dataset, 'with_rxn_class', args.experiments)
+    else:
+        exp_dir = os.path.join(ROOT_DIR, 'experiments', args.dataset, 'without_rxn_class', args.experiments)
+
+    # 4. 加载模型
+    checkpoint = torch.load(os.path.join(exp_dir, args.epoch))
+    config = checkpoint['saveables']
+    model = Graph2Edits(**config, device=DEVICE)
+    load_model_state(model, checkpoint['state'])
+    model.to(DEVICE)
+    dataset_root = os.path.join(ROOT_DIR, 'data', args.dataset)
+    model.set_lg_cooccurrence_adj(
+        load_lg_cooccurrence_adj(os.path.join(dataset_root, 'train', 'lg_cooccurrence_adj.pt'),
+                                 len(config['atom_vocab'])))
+    model.set_edit_class_statistics(
+        load_or_build_edit_class_stats(dataset_root, config['bond_vocab'], config['atom_vocab']),
+        initialize_lg_tail=False)
+    model.eval()
+
+    # 5. 初始化 beam search
+    beam_model = BeamSearch(model=model, step_beam_size=10,
+                            beam_size=args.beam_size, use_rxn_class=args.use_rxn_class)
+
+    # 6. 初始化统计字典: stats[(rxn_class, bucket)] = {'total':0, 'top1':0, ..., 'rt':0}
+    stats = defaultdict(lambda: {'total': 0, 'top1': 0, 'top3': 0, 'top5': 0, 'top10': 0, 'rt': 0})
+    # 另外分别统计各桶的总样本数（用于整体汇总）
+    bucket_total = defaultdict(int)
+
+    # 如果启用 round-trip，需准备 translator（这里仅为示例，实际需构建）
+    translator = None
+    if args.round_trip:
+        # 假设你有独立的翻译模型（如 OpenNMT），此处简化
+        from onmt.translate.translator import build_translator
+        from onmt.utils.logging import init_logger
+        import onmt.opts
+        # 设置解析参数，这里仅示意，你需要根据实际配置调整
+        rt_parse = argparse.ArgumentParser()
+        onmt.opts.add_md_help_argument(rt_parse)
+        onmt.opts.translate_opts(rt_parse)
+        rt_opt = rt_parse.parse_args(['-model', args.rt_model, '-gpu', '0'])
+        logger = init_logger(rt_opt.log_file)
+        translator = build_translator(rt_opt, report_score=True)
+
+    # 7. 循环每个测试样本
+    p_bar = tqdm(enumerate(test_data), total=len(test_data))
+    for idx, rxn_data in p_bar:
+        rxn_smi = rxn_data.rxn_smi
+        rxn_class = rxn_data.rxn_class  # 可能为 None
+        true_edits = rxn_data.edits
+        bucket = get_bucket(true_edits, freq_map)
+        bucket_total[bucket] += 1
+
+        # 解析反应物和产物
+        r, p = rxn_smi.split('>>')
+        r_mol = Chem.MolFromSmiles(r)
+        [a.ClearProp('molAtomMapNumber') for a in r_mol.GetAtoms()]
+        r_mol = Chem.MolFromSmiles(Chem.MolToSmiles(r_mol))
+        r_smi = Chem.MolToSmiles(r_mol, isomericSmiles=True)
+        r_set = set(r_smi.split('.'))
+
+        # 运行 beam search
+        with torch.no_grad():
+            top_k_results = beam_model.run_search(
+                prod_smi=p, max_steps=args.max_steps, rxn_class=rxn_class if args.use_rxn_class else None)
+
+        # 检查 Top-1,3,5,10 命中
+        beam_matched_idx = None  # 记录命中的最小索引（0-based）
+        for beam_idx, path in enumerate(top_k_results):
+            pred_smi = path['final_smi']
+            if pred_smi == 'final_smi_unmapped':
+                continue
+            pred_set = set(pred_smi.split('.'))
+            if pred_set == r_set:
+                beam_matched_idx = beam_idx
+                break
+
+        # 更新统计（按 rxn_class 和 bucket）
+        if rxn_class is None:
+            # 如果没有反应类别，统一归为 class -1
+            rxn_class = -1
+        key = (rxn_class, bucket)
+        stats[key]['total'] += 1
+        if beam_matched_idx is not None:
+            if beam_matched_idx < 1: stats[key]['top1'] += 1
+            if beam_matched_idx < 3: stats[key]['top3'] += 1
+            if beam_matched_idx < 5: stats[key]['top5'] += 1
+            if beam_matched_idx < 10: stats[key]['top10'] += 1
+
+        # Round-trip 评估（如果启用）
+        if args.round_trip and beam_matched_idx is not None:
+            # 使用 beam search 中第 0 个预测（或最优预测）做 round-trip
+            # 这里简化：我们取第一个预测（top-1）
+            best_path = top_k_results[0] if top_k_results else None
+            if best_path and best_path['final_smi'] != 'final_smi_unmapped':
+                pred_smi = best_path['final_smi']
+                # 将预测的 SMILES 保存为临时文件，然后调用 translator
+                temp_file = os.path.join(exp_dir, f'rt_temp_{idx}.txt')
+                with open(temp_file, 'w') as f:
+                    # tokenize
+                    tokenized = smi_tokenizer(pred_smi)
+                    f.write(tokenized + '\n')
+                # 执行翻译（假设 translator 已配置）
+                all_predictions = round_trip_translate(temp_file, rt_opt, translator)
+                # 检查 round-trip 结果是否与真实反应物集匹配
+                rt_success = False
+                for preds in all_predictions:
+                    for pred in preds:
+                        cleaned = ''.join(pred.strip().split(' '))
+                        mol = Chem.MolFromSmiles(cleaned)
+                        if mol is not None:
+                            cleaned_smi = Chem.MolToSmiles(mol, isomericSmiles=True)
+                            if set(cleaned_smi.split('.')) == r_set:
+                                rt_success = True
+                                break
+                    if rt_success:
+                        break
+                if rt_success:
+                    stats[key]['rt'] += 1
+
+        # 更新进度描述
+        if idx % 10 == 0:
+            msg = f"Total: {idx+1}"
+            p_bar.set_description(msg)
+
+    # 8. 输出报告（Markdown表格）
+    # 先按反应类别排序
+    classes = sorted(set(k[0] for k in stats.keys() if k[0] != -1))
+    if -1 in set(k[0] for k in stats.keys()):
+        classes.append(-1)
+    buckets = ['Many-shot', 'Medium-shot', 'Few-shot']
+
+    # 生成整体汇总行
+    overall = {b: {'total':0, 'top1':0, 'top3':0, 'top5':0, 'top10':0, 'rt':0} for b in buckets}
+
+    report_lines = [
+        f"# Bucket Evaluation: {args.experiments}",
+        "",
+        f"- Dataset: `{args.dataset}`",
+        f"- Checkpoint: `{args.epoch}`",
+        f"- Beam size: `{args.beam_size}`",
+        f"- Max steps: `{args.max_steps}`",
+        f"- Unit: `reaction`",
+        f"- Test reactions: `{len(test_data)}`",
+        f"- Use reaction class: `{args.use_rxn_class}`",
+        f"- Round-trip: `{args.round_trip}`",
+        "",
+        "## Evaluation Report (Bucket by Minimum Edit Frequency)",
+        "",
+        "| Reaction Class | Bucket | Total Reactions | Top-1 | Top-3 | Top-5 | Top-10 | Round-trip |",
+        "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
+    ]
+    csv_rows = []
+
+    for rxn_cls in classes:
+        for bucket in buckets:
+            key = (rxn_cls, bucket)
+            if key not in stats:
+                # 如果没有样本，跳过或打印空行
+                continue
+            s = stats[key]
+            total = s['total']
+            if total == 0:
+                continue
+            top1 = s['top1'] / total * 100
+            top3 = s['top3'] / total * 100
+            top5 = s['top5'] / total * 100
+            top10 = s['top10'] / total * 100
+            rt = s['rt'] / total * 100 if args.round_trip else '-'
+            cls_name = str(rxn_cls) if rxn_cls != -1 else 'Overall'
+            report_lines.append(
+                f"| {cls_name} | {bucket} | {total} | {top1:.1f}% | {top3:.1f}% | {top5:.1f}% | {top10:.1f}% | {rt if rt=='-' else f'{rt:.1f}%'} |")
+            csv_rows.append({
+                'section': 'by_reaction_class',
+                'reaction_class': cls_name,
+                'bucket': bucket,
+                'total_reactions': total,
+                'top1': round(top1, 4),
+                'top3': round(top3, 4),
+                'top5': round(top5, 4),
+                'top10': round(top10, 4),
+                'round_trip': '' if rt == '-' else round(rt, 4),
+            })
+
+            # 累加整体汇总
+            overall[bucket]['total'] += total
+            overall[bucket]['top1'] += s['top1']
+            overall[bucket]['top3'] += s['top3']
+            overall[bucket]['top5'] += s['top5']
+            overall[bucket]['top10'] += s['top10']
+            overall[bucket]['rt'] += s['rt']
+
+    # 打印整体汇总（所有类别合并）
+    report_lines.extend([
+        "",
+        "### Overall Summary (All Reaction Classes)",
+        "",
+        "| Bucket | Total Reactions | Top-1 | Top-3 | Top-5 | Top-10 | Round-trip |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
+    ])
+    for bucket in buckets:
+        s = overall[bucket]
+        total = s['total']
+        if total == 0:
+            continue
+        top1 = s['top1'] / total * 100
+        top3 = s['top3'] / total * 100
+        top5 = s['top5'] / total * 100
+        top10 = s['top10'] / total * 100
+        rt = s['rt'] / total * 100 if args.round_trip else '-'
+        report_lines.append(
+            f"| {bucket} | {total} | {top1:.1f}% | {top3:.1f}% | {top5:.1f}% | {top10:.1f}% | {rt if rt=='-' else f'{rt:.1f}%'} |")
+        csv_rows.append({
+            'section': 'overall',
+            'reaction_class': 'All',
+            'bucket': bucket,
+            'total_reactions': total,
+            'top1': round(top1, 4),
+            'top3': round(top3, 4),
+            'top5': round(top5, 4),
+            'top10': round(top10, 4),
+            'round_trip': '' if rt == '-' else round(rt, 4),
+        })
+
+    overall_total = sum(overall[bucket]['total'] for bucket in buckets)
+    if overall_total != len(test_data):
+        print(f'Warning: overall bucket total {overall_total} != test reactions {len(test_data)}. '
+              f'This report should count reactions, not edit steps.')
+
+    report_text = '\n'.join(report_lines)
+    print('\n' + report_text)
+
+    report_path = os.path.join(exp_dir, args.report_file) if args.report_file else get_available_report_path(exp_dir, args.epoch)
+    with open(report_path, 'w', encoding='utf-8') as fp:
+        fp.write(report_text + '\n')
+    print(f'\nSaved bucket evaluation report to: {report_path}')
+
+    csv_path = os.path.join(exp_dir, args.csv_file) if args.csv_file else get_available_csv_path(exp_dir, args.epoch)
+    fieldnames = [
+        'section', 'reaction_class', 'bucket', 'total_reactions',
+        'top1', 'top3', 'top5', 'top10', 'round_trip'
+    ]
+    with open(csv_path, 'w', encoding='utf-8', newline='') as fp:
+        meta_writer = csv.writer(fp)
+        meta_writer.writerow(['experiment', args.experiments])
+        meta_writer.writerow(['dataset', args.dataset])
+        meta_writer.writerow(['checkpoint', args.epoch])
+        meta_writer.writerow(['beam_size', args.beam_size])
+        meta_writer.writerow(['max_steps', args.max_steps])
+        meta_writer.writerow(['unit', 'reaction'])
+        meta_writer.writerow(['num_test_reactions', len(test_data)])
+        meta_writer.writerow(['use_rxn_class', args.use_rxn_class])
+        meta_writer.writerow(['round_trip_enabled', args.round_trip])
+        meta_writer.writerow([])
+
+        writer = csv.DictWriter(fp, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_rows)
+    print(f'Saved bucket evaluation CSV to: {csv_path}')
 
 if __name__ == '__main__':
     main()

@@ -6,7 +6,3 @@
 *.md text eol=lf
 *.txt text eol=lf
 *.csv text eol=lf
-
-# Preserve version-matched datasets and checkpoint bytes on every platform.
-data/** -text
-experiment/**/*.pt -text
