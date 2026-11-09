@@ -13,19 +13,19 @@ def build_action_freq_map(dataset='uspto_50k'):
     train_file = f'data/{dataset}/train/train.file.kekulized'
     if not os.path.exists(train_file):
         raise FileNotFoundError(f"Training file not found: {train_file}")
-
+    
     rxns_data = joblib.load(train_file)
     action_counter = Counter()
-
+    
     for rxn in rxns_data:
         for edit in rxn.edits:
             if edit != 'Terminate':
                 action_counter[edit] += 1
-
+                
     save_path = f'data/{dataset}/train/action_freq_map.pkl'
     joblib.dump(action_counter, save_path)
     print(f"Saved action frequency map with {len(action_counter)} unique actions to {save_path}")
-
+    
     freqs = list(action_counter.values())
     if freqs:
         print(f"Min freq: {min(freqs)}, Max freq: {max(freqs)}, Median: {sorted(freqs)[len(freqs)//2]}")

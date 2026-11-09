@@ -70,7 +70,7 @@ def main():
         exp_dir = os.path.join(
             ROOT_DIR, 'experiments', f'{args.dataset}', 'without_rxn_class', f'{args.experiments}')
 
-    checkpoint = torch.load(os.path.join(exp_dir, 'epoch_77.pt'))
+    checkpoint = torch.load(os.path.join(exp_dir, 'epoch_86.pt'))
     config = checkpoint['saveables']
 
     model = Graph2Edits(**config, device=DEVICE)

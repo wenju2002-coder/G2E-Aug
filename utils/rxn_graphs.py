@@ -120,8 +120,8 @@ class RxnGraph:
         self.rxn_class = rxn_class
 
     def get_components(self, attrs: List = ['prod_graph', 'edit_to_apply', 'edit_atom']) -> Tuple:
-        """
-        Returns the components associated with the reaction graph.
+        """ 
+        Returns the components associated with the reaction graph. 
         """
         attr_tuple = ()
         for attr in attrs:

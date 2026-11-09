@@ -1,65 +1,225 @@
 # G2E-Aug
 
-> **论文投稿中，为避免版权和复制风险，我们建议中稿后补全并公开，有问题请联系我们。**
+Complete source for **Graph2Edits-Aug**, an augmented Graph2Edits implementation
+used in **RetroTail: Edit-frequency stratified evaluation for single-step
+retrosynthesis prediction**.
 
-This repository is the public, review-period snapshot of **Graph2Edits-Aug**, a
-research project for frequency-stratified evaluation of graph-editing
-retrosynthesis. The implementation will be completed after the associated
-manuscript is accepted.
+The previous review-period placeholders have been replaced with the complete
+model, training, preprocessing and chemistry implementations. This release
+restores the manuscript's archived implementation, without new training results
+or changes to the model architecture.
 
-## Release status
-
-The repository intentionally preserves the project layout, evaluation protocol,
-small chemistry lookup tables, license, and aggregate experiment reports. The
-following implementation files are placeholders in this review-period release:
-
-- `models/graph2edits.py` — augmented model implementation;
-- `train.py` — optimization and auxiliary-loss implementation;
-- `preprocess.py` — training-artifact construction;
-- `prepare_data.py` — augmented training-data tensorization;
-- `utils/class_balance.py` — long-tail balancing and logit adjustment;
-- `utils/chem.py` — chemistry and bond-energy feature helpers.
-
-Because these modules are withheld, this snapshot is **not currently runnable
-for training or inference**. Raw USPTO-derived data, generated preprocessing
-artifacts, Python bytecode, and model checkpoints are also intentionally absent.
-No complete implementation is present in this repository's Git history.
-
-## Available material
-
-- `eval_bucket.py` contains the reaction-level frequency-stratified evaluation
-  protocol used to report many-shot, medium-shot, and few-shot exact-match
-  accuracy.
-- `utils/action_frequencies.py` contains the edit-frequency counting helper.
-- `experiment/` contains small aggregate logs and bucket reports, but no model
-  weights.
-- `data/Atoms_character.txt` and `data/Bond_Energy.txt` are small lookup tables.
-
-The public results distinguish reactions by the minimum training frequency of
-their required non-terminal edit actions:
-
-- many-shot: frequency greater than 100;
-- medium-shot: frequency from 20 through 100;
-- few-shot: frequency below 20.
+RetroTail is an **evaluation workflow**, not a new predictor. The case study
+covers the Graph2Edits family, one USPTO-50K split and one checkpoint per model
+and class setting. Low reference-edit frequency is not chemical novelty, and
+cross-model generality has not been established.
 
 ## Upstream project
 
-This work is derived from Graph2Edits:
+Derived from [Graph2Edits](https://github.com/Jamson-Zhong/Graph2Edits):
 
-> Zhong W, Yang Z, Chen CY-C. Retrosynthesis prediction using an end-to-end
-> graph generative architecture for molecular graph editing. *Nature
-> Communications*. 2023;14:3009.
-> https://doi.org/10.1038/s41467-023-38851-5
+> Zhong W, Yang Z, Chen CY-C. Retrosynthesis prediction using an end-to-end graph
+> generative architecture for molecular graph editing. Nature Communications
+> 14, 3009 (2023). https://doi.org/10.1038/s41467-023-38851-5
 
-Please cite the original work when using the base architecture. Citation details
-for the accompanying manuscript will be added after publication.
+The upstream release is on [Zenodo](https://doi.org/10.5281/zenodo.7837349).
+That DOI belongs to original Graph2Edits, not this project. Please cite and
+retain the upstream work and its license.
+
+## Environment requirements
+
+| Package | Reference version |
+| --- | --- |
+| Python | 3.11.8 |
+| PyTorch | 2.2.2 |
+| NumPy | 1.26.4 |
+| RDKit | 2024.03.4 |
+
+Additional dependencies: pandas, joblib and tqdm. From the repository root:
+
+```bash
+conda create -n g2e-aug python=3.11.8
+conda activate g2e-aug
+pip install -r requirements.txt
+```
+
+These are author-supplied reference versions, not a fully locked historical
+environment. Select a PyTorch CPU/CUDA build compatible with your machine.
+Software versions, particularly RDKit canonicalization, may affect inference.
+Fresh-environment reproduction of all historical runs is not claimed here.
+
+## Repository layout
+
+```text
+models/                         complete augmented model, encoder and beam search
+utils/                          chemistry, graph, frequency and balancing helpers
+data/Atoms_character.txt        electronegativity lookup
+data/Bond_Energy.txt             bond-energy lookup
+canonicalize_prod.py             canonicalize and remap raw reaction CSV files
+preprocess.py                   generate reference edits and training artifacts
+prepare_data.py                 tensorize training data
+train.py                        train Graph2Edits-Aug
+eval.py                         retained legacy aggregate evaluator
+eval_bucket.py                  recommended explicit-checkpoint evaluator
+historical_eval_bucket.py       retained historical bucket evaluator
+export_reaction_predictions.py  optional standalone prediction exporter
+cils_statistical_resolution.py  legacy unpaired power-planning calculation
+reaction_class_mapping.csv      index 0-9 to standard reaction class 1-10
+experiment/                     historical logs and aggregate reports, no weights
+tests/                          lightweight evaluator regression tests
+```
+
+## Data and checkpoints
+
+This repository contains **complete source code**, small chemistry lookups and
+historical summaries. It does **not** contain raw/processed USPTO datasets,
+checkpoints, local environment archives or manuscript files. Original
+Graph2Edits resources are available from its upstream release; Aug weights and
+manuscript-specific processed artifacts are separate resources, not upstream
+weights. No project-specific public archive DOI is claimed.
+
+For exact numerical reproduction of the manuscript, use its version-matched
+Supplementary Code and Data / Additional files with matching processed data,
+weights and retained ranked prediction records. Those files are not silently
+bundled into this Git repository. Only load trusted checkpoint/joblib files:
+their formats can execute code.
+
+Place `canonicalized_train.csv`, `canonicalized_valid.csv` and
+`canonicalized_test.csv` under `data/uspto_50k/`. Required CSV columns are `id`,
+`class` and `reactants>reagents>production`. If starting from matching raw
+splits, put `raw_train.csv`, `raw_valid.csv` and `raw_test.csv` there and run:
+
+```bash
+python canonicalize_prod.py --dataset uspto_50k --mode train
+python canonicalize_prod.py --dataset uspto_50k --mode valid
+python canonicalize_prod.py --dataset uspto_50k --mode test
+```
+
+Use matching processed files for exact reproduction; different chemistry
+versions need not generate identical records. The audited split has 39985
+processed training reactions and 5004 evaluated test reactions; three source
+test reactions with unsupported `Add Bond` edits are filtered in preprocessing.
+
+## Preprocessing and training
+
+Run from the repository root, training split first:
+
+```bash
+python preprocess.py --mode train --dataset uspto_50k
+python preprocess.py --mode valid --dataset uspto_50k
+python preprocess.py --mode test --dataset uspto_50k
+```
+
+Training preprocessing creates vocabularies, `action_freq_map.pkl`,
+`lg_cooccurrence_adj.pt` and `edit_class_stats.pt` in `data/uspto_50k/train/`.
+
+Reaction class unknown (class input withheld):
+
+```bash
+python prepare_data.py --dataset uspto_50k
+python train.py --dataset uspto_50k
+```
+
+Reaction class known (class input supplied):
+
+```bash
+python prepare_data.py --dataset uspto_50k --use_rxn_class
+python train.py --dataset uspto_50k --use_rxn_class
+```
+
+In preparation/training, `--use_rxn_class` is a store-true flag: include it for
+known and omit it for unknown; do not append `False`.
+Training writes to `experiments/` (plural), whereas archived run folders use
+`experiment/` (singular). The recommended evaluator accepts an explicit
+checkpoint path, so no directory renaming is needed.
+
+## Evaluation
+
+### Recommended interface: eval_bucket.py
+
+This evaluator strictly loads an explicit checkpoint, preserves its saved
+prior/co-occurrence buffers and reports aggregate and stratified Top-1/3/5/10
+accuracy. It also exports per-reaction ranked records without changing beam
+ranking or training. After obtaining the matching weights/data:
+
+```bash
+# Reaction class unknown
+python eval_bucket.py --dataset uspto_50k --use_rxn_class False --experiments 16-07-2026--01-17-31 --epoch epoch_86.pt --expected_test_reactions 5004
+
+# Reaction class known
+python eval_bucket.py --dataset uspto_50k --use_rxn_class True --experiments 15-07-2026--01-22-06 --epoch epoch_124.pt --expected_test_reactions 5004
+```
+
+Here `--experiments` resolves under `experiment/uspto_50k/` (singular). For a
+new training run or another location, use `--checkpoint` **instead of**
+`--experiments`/`--epoch`:
+
+```bash
+python eval_bucket.py --dataset uspto_50k --checkpoint experiments/uspto_50k/without_rxn_class/YOUR_RUN/epoch_YOUR_EPOCH.pt --output_dir evaluation/YOUR_NEW_RUN
+```
+
+Add `--use_rxn_class` for a class-conditioned checkpoint. This modern evaluator
+accepts the flag alone or explicit `True`/`False` values. Existing output
+directories are never overwritten. See `python eval_bucket.py --help` for
+CPU/CUDA, beam, input-file and smoke-test options. A `--max_reactions` run is
+explicitly partial, not a full benchmark.
+
+Each new evaluation directory contains:
+
+- `pred_results.txt`: human-readable ranked predictions;
+- `predictions_top10.csv` and `predictions.jsonl`: per-reaction candidates,
+  identifiers, bucket assignments and correctness flags;
+- `bucket_eval_<epoch>.csv` / `.md`: aggregate and subgroup summaries;
+- `metadata.json`: source/data/checkpoint hashes, versions and completion state;
+- `action_freq_map.pkl`: the frequency map used for that evaluation.
+
+Invalid candidate ranks and reaction denominators are retained. Bucket summaries
+do not replace per-reaction records for paired model comparisons.
+
+### Legacy interface: eval.py
+
+The historical scoring implementation is retained unchanged. It writes
+`pred_results.txt` or numbered `pred_results_*.txt` files, but uses the
+hard-coded `epoch_86.pt` under `experiments/`. Its `--use_rxn_class` is a
+store-true flag, not a Boolean-value argument. For other epochs, including
+class-known epoch 124, use `eval_bucket.py` above; do not mistake the legacy
+script for a generic checkpoint-selection interface.
+
+## Frequency-stratified protocol
+
+Each test reaction takes the minimum training count of its required
+non-terminal reference edits; unseen labels have count zero:
+
+- **Many-shot:** count >100;
+- **Medium-shot:** count 20-100 inclusive;
+- **Few-shot:** count <20.
+
+The manuscript split has 4832 / 120 / 52 reactions in these groups. Grouping
+requires the reference reactants, so it is retrospective, not a product-only
+novelty detector. Processed class indices 0-9 map to standard classes 1-10.
+Class known/unknown describes the model input, not missing annotations.
+
+## Model scope
+
+Seven jointly enabled changes are an atom-environment-electronegativity-derived
+bond descriptor, a bond-energy scalar inside an auxiliary bond-breaking head,
+cost-sensitive auxiliary loss, graph alignment, effective-number balancing,
+prior-based logit adjustment during **training and inference**, and a
+leaving-group co-occurrence graph. Bond energy is not appended to the main bond
+encoder input and does not directly rank beam candidates. No single-component
+ablation or seed-replicated improvement claim is made.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+These check parsing, bucket boundaries, class numbering and rank-preserving
+scoring without running model training or inference.
 
 ## License
 
-Code in this snapshot is provided under the [MIT License](LICENSE). Dataset and
-third-party materials remain subject to their respective terms.
-
-## Contact
-
-For questions or academic discussion, please contact the repository owner through
-GitHub. Full implementation details are planned for release after acceptance.
+The upstream [MIT License](LICENSE) and copyright notice are retained. Original
+datasets, checkpoints and third-party materials retain their own terms; this
+code license does not relicense them.

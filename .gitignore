@@ -30,3 +30,13 @@ experiment/**/*.pt
 
 # Evaluation outputs generated locally
 pred_results*.txt
+
+# Large local environments, checkpoints and publication material
+*.pt
+*.tar.gz
+*.zip
+*.docx
+*.pdf
+evaluation/
+outputs/
+tmp/
