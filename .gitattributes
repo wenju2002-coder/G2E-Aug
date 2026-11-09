@@ -1,8 +1,2 @@
-* text=auto
-
-.gitattributes text eol=lf
-.gitignore text eol=lf
-*.py text eol=lf
-*.md text eol=lf
-*.txt text eol=lf
-*.csv text eol=lf
+# Preserve original code, data and checkpoint bytes without newline conversion.
+* -text

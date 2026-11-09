@@ -67,7 +67,7 @@ def get_bucket(edits, freq_map):
 # ---------- Round-trip 辅助（从 eval-1.py 移植）----------
 def smi_tokenizer(smi):
     import re
-    pattern = r"(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+    pattern = "(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
     regex = re.compile(pattern)
     tokens = [token for token in regex.findall(smi)]
     assert smi == ''.join(tokens)
@@ -158,7 +158,7 @@ def main():
         exp_dir = os.path.join(ROOT_DIR, 'experiments', args.dataset, 'with_rxn_class', args.experiments)
     else:
         exp_dir = os.path.join(ROOT_DIR, 'experiments', args.dataset, 'without_rxn_class', args.experiments)
-
+    
     # 4. 加载模型
     checkpoint = torch.load(os.path.join(exp_dir, args.epoch))
     config = checkpoint['saveables']
@@ -285,10 +285,10 @@ def main():
     if -1 in set(k[0] for k in stats.keys()):
         classes.append(-1)
     buckets = ['Many-shot', 'Medium-shot', 'Few-shot']
-
+    
     # 生成整体汇总行
     overall = {b: {'total':0, 'top1':0, 'top3':0, 'top5':0, 'top10':0, 'rt':0} for b in buckets}
-
+    
     report_lines = [
         f"# Bucket Evaluation: {args.experiments}",
         "",
@@ -307,7 +307,7 @@ def main():
         "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
     ]
     csv_rows = []
-
+    
     for rxn_cls in classes:
         for bucket in buckets:
             key = (rxn_cls, bucket)
@@ -337,7 +337,7 @@ def main():
                 'top10': round(top10, 4),
                 'round_trip': '' if rt == '-' else round(rt, 4),
             })
-
+            
             # 累加整体汇总
             overall[bucket]['total'] += total
             overall[bucket]['top1'] += s['top1']
@@ -345,7 +345,7 @@ def main():
             overall[bucket]['top5'] += s['top5']
             overall[bucket]['top10'] += s['top10']
             overall[bucket]['rt'] += s['rt']
-
+    
     # 打印整体汇总（所有类别合并）
     report_lines.extend([
         "",
