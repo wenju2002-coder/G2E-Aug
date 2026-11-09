@@ -55,6 +55,7 @@ models/                         complete augmented model, encoder and beam searc
 utils/                          chemistry, graph, frequency and balancing helpers
 data/Atoms_character.txt        electronegativity lookup
 data/Bond_Energy.txt             bond-energy lookup
+data/uspto_50k/                 raw, canonicalised and processed matching splits
 canonicalize_prod.py             canonicalize and remap raw reaction CSV files
 preprocess.py                   generate reference edits and training artifacts
 prepare_data.py                 tensorize training data
@@ -65,46 +66,45 @@ historical_eval_bucket.py       retained historical bucket evaluator
 export_reaction_predictions.py  optional standalone prediction exporter
 cils_statistical_resolution.py  legacy unpaired power-planning calculation
 reaction_class_mapping.csv      index 0-9 to standard reaction class 1-10
-experiment/                     historical logs and aggregate reports
-reproducibility/                downloadable manuscript-matched data and weights
+experiment/                     two retained Aug checkpoints, logs and reports
+DATA_CHECKPOINTS_SHA256.json     hashes and source provenance for published assets
 tests/                          lightweight evaluator regression tests
 ```
 
 ## Data and checkpoints
 
-This repository contains **complete source code** and now also publishes the
-version-matched manuscript data, four retained checkpoints and ranked prediction
-records in [the RetroTail evidence archive](reproducibility/retrotail-jci-20261109/).
-The public version is tagged
-[`retrotail-data-20261109`](https://github.com/wenju2002-coder/G2E-Aug/tree/retrotail-data-20261109/reproducibility/retrotail-jci-20261109).
-No project-specific Zenodo DOI is claimed.
+The original directory layout now directly includes the **Graph2Edits-Aug
+datasets and its two retained checkpoints**. No ZIP extraction or extra
+`reproducibility/` directory is required. The version is tagged
+[`g2e-aug-data-20261109`](https://github.com/wenju2002-coder/G2E-Aug/tree/g2e-aug-data-20261109).
 
-| Archive | Contents |
+| Location | Contents |
 | --- | --- |
-| [Additional file 2](reproducibility/retrotail-jci-20261109/Additional_file_2.zip) | Four matched per-reaction prediction tables; statistical and plotting data/code |
-| [Additional file 3](reproducibility/retrotail-jci-20261109/Additional_file_3.zip) | Graph2Edits source, raw/canonicalised/processed reaction data and vocabularies |
-| [Additional file 4](reproducibility/retrotail-jci-20261109/Additional_file_4.zip) | Graph2Edits checkpoints (unknown epoch 123; known epoch 92), logs and raw predictions |
-| [Additional file 5](reproducibility/retrotail-jci-20261109/Additional_file_5.zip) | Graph2Edits-Aug source, matching reaction data, descriptors and vocabularies |
-| [Additional file 6](reproducibility/retrotail-jci-20261109/Additional_file_6.zip) | Graph2Edits-Aug checkpoints (unknown epoch 86; known epoch 124), logs and raw predictions |
+| [data/uspto_50k/](data/uspto_50k/) | Raw and canonicalised train/validation/test CSVs |
+| [data/uspto_50k/train/](data/uspto_50k/train/) | Processed training reactions, edit/atom/leaving-group vocabularies and frequency map |
+| [data/uspto_50k/valid/](data/uspto_50k/valid/) | Matching processed validation reactions |
+| [data/uspto_50k/test/](data/uspto_50k/test/) | Matching processed test reactions |
+| [Unknown-class checkpoint](experiment/uspto_50k/without_rxn_class/16-07-2026--01-17-31/epoch_86.pt) | Aug epoch 86, without reaction-class input |
+| [Known-class checkpoint](experiment/uspto_50k/with_rxn_class/15-07-2026--01-22-06/epoch_124.pt) | Aug epoch 124, with reaction-class input |
 
-Download all five independent ZIPs and extract them into **one common directory**,
-not into five separate wrapper folders. This restores `Analysis/`,
-`evidence_analysis/`, `Graph2Edits/` and `Graph2Edits-Aug/`. The archived model
-directories contain their matching source versions; use them when reproducing
-historical inference, rather than assuming that any future `main` version is
-identical. The outer archive README contains extraction, integrity checks and
-provenance information. The ZIPs are byte-identical to the manuscript's local
-Additional files 2-6; no new training or inference was performed for publication.
-Local environments and main manuscript files are not included.
+The six CSVs and both checkpoints are byte-identical to the original local
+Graph2Edits-Aug resources. The processed files and vocabularies match manuscript
+Additional file 5; the checkpoints also match Additional file 6. File hashes and
+provenance are in [DATA_CHECKPOINTS_SHA256.json](DATA_CHECKPOINTS_SHA256.json).
+No new training or inference was performed for this upload. The retained
+Graph2Edits **baseline** checkpoints and the four model-setting prediction tables
+remain in the manuscript's Additional files; they are not Aug checkpoints.
+Local environments and manuscript files are not included. No project-specific
+Zenodo DOI is claimed.
 
-Original Graph2Edits resources are also available from its upstream release;
-the Aug checkpoints are separate from the original Graph2Edits checkpoints.
-Only load trusted checkpoint/joblib files: their formats can execute code.
+Clone the repository, install the reference dependencies and run either explicit
+evaluation command below using the supplied files. No preprocessing is needed
+to use these retained processed evaluation inputs. Do not overwrite them with a
+new preprocessing run if you intend to audit this exact archived split. Only
+load trusted checkpoint/joblib files: their formats can execute code.
 
-Place `canonicalized_train.csv`, `canonicalized_valid.csv` and
-`canonicalized_test.csv` under `data/uspto_50k/`. Required CSV columns are `id`,
-`class` and `reactants>reagents>production`. If starting from matching raw
-splits, put `raw_train.csv`, `raw_valid.csv` and `raw_test.csv` there and run:
+If intentionally rebuilding from the supplied raw CSVs, the required columns
+are `id`, `class` and `reactants>reagents>production`. Canonicalisation commands:
 
 ```bash
 python canonicalize_prod.py --dataset uspto_50k --mode train
@@ -239,7 +239,4 @@ scoring without running model training or inference.
 
 The upstream [MIT License](LICENSE) and copyright notice are retained. Original
 datasets, checkpoints and third-party materials retain their own terms; this
-code license does not relicense them. Newly contributed analysis/plotting code
-is MIT-licensed, and newly prepared statistical tables and curated prediction
-records are CC BY 4.0; see the archived
-[licence scope](reproducibility/retrotail-jci-20261109/LICENSE_SCOPE_JCI.md).
+code license does not relicense them.

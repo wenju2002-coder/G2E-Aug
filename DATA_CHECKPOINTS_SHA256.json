@@ -1,0 +1,96 @@
+{
+  "version": "g2e-aug-data-20261109",
+  "scope": "Direct-layout Aug data and two unchanged checkpoints; no baseline weights or new inference.",
+  "files": {
+    "data/Atoms_character.txt": {
+      "bytes": 176,
+      "sha256": "547d6518502de1b4558644000ee78705f374070ad88fc5f287f831ec8b98516d",
+      "source": "original Graph2Edits-Aug/data/Atoms_character.txt"
+    },
+    "data/Bond_Energy.txt": {
+      "bytes": 990,
+      "sha256": "9a67ba90974b607e9013d615af2cb82c994e28f60759696c3a2f38da1e0fd784",
+      "source": "original Graph2Edits-Aug/data/Bond_Energy.txt"
+    },
+    "data/uspto_50k/canonicalized_test.csv": {
+      "bytes": 2033751,
+      "sha256": "e708b9b4061b34dc6991b5475522dd515bfc475259fd9ffc6c64abc44d9537bc",
+      "source": "original Graph2Edits-Aug/data/uspto_50k/canonicalized_test.csv"
+    },
+    "data/uspto_50k/canonicalized_train.csv": {
+      "bytes": 16304865,
+      "sha256": "7ccf0b70e4c4edc78497282fdc6c17e5b8605529c13debfe3ce65c004c124458",
+      "source": "original Graph2Edits-Aug/data/uspto_50k/canonicalized_train.csv"
+    },
+    "data/uspto_50k/canonicalized_valid.csv": {
+      "bytes": 2036093,
+      "sha256": "5a4c2b9f57dc16f8a62f2a0f464f1f622d8ee55a4b1343d748977b1720a63f3d",
+      "source": "original Graph2Edits-Aug/data/uspto_50k/canonicalized_valid.csv"
+    },
+    "data/uspto_50k/raw_test.csv": {
+      "bytes": 1974084,
+      "sha256": "606be1a3f7eb6ecae0ba7b8cc2885bd2ebf4ce05b25baef48ba93447811a15f6",
+      "source": "original Graph2Edits-Aug/data/uspto_50k/raw_test.csv"
+    },
+    "data/uspto_50k/raw_train.csv": {
+      "bytes": 15838430,
+      "sha256": "96dd3f57546d8e12b477102a617baa090517c2c05210f2cdf00d0fca9e74508b",
+      "source": "original Graph2Edits-Aug/data/uspto_50k/raw_train.csv"
+    },
+    "data/uspto_50k/raw_valid.csv": {
+      "bytes": 1977425,
+      "sha256": "f054f2db0e61b5a664829e433871ef916a143cc3a9a7cbe78f130baf47fa83de",
+      "source": "original Graph2Edits-Aug/data/uspto_50k/raw_valid.csv"
+    },
+    "data/uspto_50k/test/test.file.kekulized": {
+      "bytes": 502966,
+      "sha256": "bc567144f1a761856d86fbac4bdb99d66a680aef9428a14f38744c17c95f6e39",
+      "source": "Additional_file_5.zip/Graph2Edits-Aug/data/uspto_50k/test/test.file.kekulized"
+    },
+    "data/uspto_50k/train/action_freq_map.pkl": {
+      "bytes": 3531,
+      "sha256": "81e22064ccbec32bf65de0f97d61607572d47352956ae12534022cbcec73336a",
+      "source": "Additional_file_5.zip/Graph2Edits-Aug/data/uspto_50k/train/action_freq_map.pkl"
+    },
+    "data/uspto_50k/train/atom_lg_vocab.txt": {
+      "bytes": 3076,
+      "sha256": "a3cc5951e807de657223b359868091b44dcdc89e8654ef68a03b95577198202a",
+      "source": "Additional_file_5.zip/Graph2Edits-Aug/data/uspto_50k/train/atom_lg_vocab.txt"
+    },
+    "data/uspto_50k/train/atom_vocab.txt": {
+      "bytes": 98,
+      "sha256": "0a397f3414ac8e9c260ccbcbd09a42974cbf38e1df30fe245413edfdc3730ffb",
+      "source": "Additional_file_5.zip/Graph2Edits-Aug/data/uspto_50k/train/atom_vocab.txt"
+    },
+    "data/uspto_50k/train/bond_vocab.txt": {
+      "bytes": 98,
+      "sha256": "763446610c99caee5014e88b94be27e6066aab7887c80ff84ec307ef723dfc3d",
+      "source": "Additional_file_5.zip/Graph2Edits-Aug/data/uspto_50k/train/bond_vocab.txt"
+    },
+    "data/uspto_50k/train/lg_vocab.txt": {
+      "bytes": 2994,
+      "sha256": "018ee1f41a65fd1aeec363cccd6e14fb51a7b01e97b1804bfe63243f847f7578",
+      "source": "Additional_file_5.zip/Graph2Edits-Aug/data/uspto_50k/train/lg_vocab.txt"
+    },
+    "data/uspto_50k/train/train.file.kekulized": {
+      "bytes": 3965204,
+      "sha256": "14cedf3794d1e31f5402b22f36c9b8b6ec39e608f080f1f4cd1a8f15a2eab85b",
+      "source": "Additional_file_5.zip/Graph2Edits-Aug/data/uspto_50k/train/train.file.kekulized"
+    },
+    "data/uspto_50k/valid/valid.file.kekulized": {
+      "bytes": 500872,
+      "sha256": "54f4e31c7a858c14ccc7dba9de12ff07d35aa7c70230fc2987c503ee0e6c64ac",
+      "source": "Additional_file_5.zip/Graph2Edits-Aug/data/uspto_50k/valid/valid.file.kekulized"
+    },
+    "experiment/uspto_50k/with_rxn_class/15-07-2026--01-22-06/epoch_124.pt": {
+      "bytes": 6551216,
+      "sha256": "0522882ab2a1afae03581d5c34ea97081a91cc687df8afabc7075bfec3f9e033",
+      "source": "original Graph2Edits-Aug/experiment/uspto_50k/with_rxn_class/15-07-2026--01-22-06/epoch_124.pt"
+    },
+    "experiment/uspto_50k/without_rxn_class/16-07-2026--01-17-31/epoch_86.pt": {
+      "bytes": 6530686,
+      "sha256": "540c41d8663faf2f3f16ec6bdb3d658c22e1fbb76667c6a720aee07aa99c0e16",
+      "source": "original Graph2Edits-Aug/experiment/uspto_50k/without_rxn_class/16-07-2026--01-17-31/epoch_86.pt"
+    }
+  }
+}
